@@ -12,26 +12,34 @@ import {
   BUILD_COST,
   BUILDING_SPEC,
   UNIT_COST,
+  VIEW_H,
+  VIEW_W,
   WORLD_H,
   WORLD_W,
   beginBuild,
   cancelBuild,
+  clampCamera,
+  createCamera,
   createInitialGame,
   getHoverTarget,
   issueCommand,
   placeBuilding,
   population,
   renderGame,
+  renderMinimap,
   renderMenuWorld,
   restoreGame,
   selectArea,
   selectPoint,
   serializeGame,
+  setAutoFarm,
   setBuildHover,
   trainUnit,
   updateGame,
   type Building,
   type BuildingKind,
+  type Camera,
+  type GameMode,
   type GameState,
   type HoverTarget,
   type PlayerUnitKind,
@@ -47,6 +55,7 @@ import {
 type Screen =
   | "language"
   | "menu"
+  | "modes"
   | "how"
   | "settings"
   | "credits"
@@ -65,10 +74,10 @@ const DEFAULT_SETTINGS: Settings = {
   tooltips: true,
   tutorial: true,
   sound: true,
-  largeUi: false,
+  largeUi: true,
 };
 
-const SAVE_KEY = "tai-kingdom-campaign-v2";
+const SAVE_KEY = "tai-kingdom-campaign-v3";
 const LOCALE_KEY = "tai-kingdom-locale";
 const SETTINGS_KEY = "tai-kingdom-settings-v2";
 
@@ -151,8 +160,8 @@ function MenuWorld() {
     <canvas
       ref={canvasRef}
       className="menu-world-canvas"
-      width={WORLD_W}
-      height={WORLD_H}
+      width={VIEW_W}
+      height={VIEW_H}
       aria-hidden="true"
     />
   );
@@ -292,6 +301,57 @@ function MenuScreen({
   );
 }
 
+function ModeScreen({
+  locale,
+  onChoose,
+  onBack,
+}: {
+  locale: Locale;
+  onChoose: (mode: GameMode) => void;
+  onBack: () => void;
+}) {
+  const t = translator(locale);
+  return (
+    <main className="storybook-screen modal-screen mode-screen">
+      <MenuWorld />
+      <div className="screen-vignette" />
+      <section className="paper-panel mode-panel">
+        <RibbonTitle>{t("chooseMode")}</RibbonTitle>
+        <p className="book-intro">{t("chooseModeIntro")}</p>
+        <div className="mode-grid">
+          <button className="mode-card stage-card" onClick={() => onChoose("stage")}>
+            <span className="mode-art">
+              <img src="/game-assets/buildings/castle.png" alt="" />
+              <SpritePreview src="/game-assets/enemies/troll-idle.png" />
+            </span>
+            <span className="mode-copy">
+              <small>{t("recommended")}</small>
+              <strong>{t("stageMode")}</strong>
+              <em>{t("stageModeDesc")}</em>
+              <b>{t("stageModeGoal")}</b>
+            </span>
+          </button>
+          <button className="mode-card endless-card" onClick={() => onChoose("endless")}>
+            <span className="mode-art">
+              <img src="/game-assets/buildings/tower.png" alt="" />
+              <SpritePreview src="/game-assets/units/pawn-idle.png" />
+            </span>
+            <span className="mode-copy">
+              <small>{t("survival")}</small>
+              <strong>{t("endlessMode")}</strong>
+              <em>{t("endlessModeDesc")}</em>
+              <b>{t("endlessModeGoal")}</b>
+            </span>
+          </button>
+        </div>
+        <div className="panel-footer">
+          <PaperButton onClick={onBack}>{t("back")}</PaperButton>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function HowScreen({
   locale,
   onBack,
@@ -317,6 +377,12 @@ function HowScreen({
       title: t("howEconomyTitle"),
       text: t("howEconomyText"),
       image: "/game-assets/resources/tree2.png",
+      sprite: false,
+    },
+    {
+      title: t("howWorldTitle"),
+      text: t("howWorldText"),
+      image: "/game-assets/terrain/bridge-all.png",
       sprite: false,
     },
     {
@@ -499,6 +565,9 @@ function CreditsScreen({
 }
 
 interface HudSnapshot {
+  mode: GameMode;
+  level: number;
+  elapsed: number;
   resources: Record<ResourceKind, number>;
   population: number;
   populationCap: number;
@@ -507,12 +576,16 @@ interface HudSnapshot {
   waveClock: number;
   waveActive: boolean;
   enemies: number;
+  bossAlive: boolean;
+  nestsAlive: number;
+  nestsCleared: number;
   castleHp: number;
   castleMaxHp: number;
   selectedUnits: UnitKind[];
   selectedBuilding?: Building;
   tutorialStep: number;
   tutorialEnabled: boolean;
+  autoFarm: boolean;
   buildMode?: "house" | "tower";
   notice: GameState["notice"];
   outcome: GameState["outcome"];
@@ -521,6 +594,9 @@ interface HudSnapshot {
 function makeSnapshot(state: GameState): HudSnapshot {
   const castle = state.buildings.find((building) => building.kind === "castle");
   return {
+    mode: state.mode,
+    level: state.level,
+    elapsed: state.time,
     resources: { ...state.resources },
     population: population(state),
     populationCap: state.populationCap,
@@ -529,6 +605,11 @@ function makeSnapshot(state: GameState): HudSnapshot {
     waveClock: state.waveClock,
     waveActive: state.waveActive,
     enemies: state.units.filter((unit) => unit.team === "enemy").length,
+    bossAlive: state.units.some((unit) => unit.team === "enemy" && unit.boss),
+    nestsAlive: state.buildings.filter(
+      (building) => building.team === "enemy" && building.hp > 0,
+    ).length,
+    nestsCleared: state.nestsCleared,
     castleHp: Math.ceil(castle?.hp ?? 0),
     castleMaxHp: castle?.maxHp ?? 1500,
     selectedUnits: state.units
@@ -539,17 +620,23 @@ function makeSnapshot(state: GameState): HudSnapshot {
     ),
     tutorialStep: state.tutorialStep,
     tutorialEnabled: state.tutorialEnabled,
+    autoFarm: state.autoFarm,
     buildMode: state.buildMode,
     notice: state.notice,
     outcome: state.outcome,
   };
 }
 
-function worldPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
+function worldPoint(
+  canvas: HTMLCanvasElement,
+  camera: Camera,
+  clientX: number,
+  clientY: number,
+) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: ((clientX - rect.left) / rect.width) * WORLD_W,
-    y: ((clientY - rect.top) / rect.height) * WORLD_H,
+    x: camera.x + ((clientX - rect.left) / rect.width) * VIEW_W,
+    y: camera.y + ((clientY - rect.top) / rect.height) * VIEW_H,
     screenX: clientX - rect.left,
     screenY: clientY - rect.top,
   };
@@ -659,11 +746,13 @@ function CommandDeck({
   t,
   onTrain,
   onBuild,
+  onAutoFarm,
 }: {
   state: HudSnapshot;
   t: ReturnType<typeof translator>;
   onTrain: (kind: PlayerUnitKind) => void;
   onBuild: (kind: "house" | "tower") => void;
+  onAutoFarm: () => void;
 }) {
   const building = state.selectedBuilding;
   const pawnSelected = state.selectedUnits.includes("pawn");
@@ -806,6 +895,13 @@ function CommandDeck({
                 cost={BUILD_COST.tower}
                 onClick={() => onBuild("tower")}
               />
+              <CommandButton
+                image="/game-assets/resources/tree2.png"
+                title={`${t("autoFarm")} · ${state.autoFarm ? t("on") : t("off")}`}
+                description={t("autoFarmDesc")}
+                onClick={onAutoFarm}
+                sprite
+              />
             </>
           ) : (
             <p className="command-description">
@@ -838,6 +934,8 @@ function GameScene({
   locale,
   settings,
   resumeSaved,
+  mode,
+  level,
   onExit,
   onOutcome,
   onSaveAvailable,
@@ -845,6 +943,8 @@ function GameScene({
   locale: Locale;
   settings: Settings;
   resumeSaved: boolean;
+  mode: GameMode;
+  level: number;
   onExit: () => void;
   onOutcome: (outcome: "victory" | "defeat") => void;
   onSaveAvailable: () => void;
@@ -856,11 +956,16 @@ function GameScene({
       ? restoreGame(
           typeof window === "undefined" ? null : localStorage.getItem(SAVE_KEY),
           settings.tutorial,
-        ) ?? createInitialGame(settings.tutorial)
-      : createInitialGame(settings.tutorial),
+        ) ?? createInitialGame(settings.tutorial, mode, level)
+      : createInitialGame(settings.tutorial, mode, level),
   );
   const imagesRef = useRef<ImageBank | null>(null);
+  const minimapRef = useRef<HTMLCanvasElement>(null);
+  const cameraRef = useRef<Camera>(createCamera(stateRef.current));
   const pausedRef = useRef(false);
+  const speedRef = useRef<1 | 2 | 3 | 4>(1);
+  const keysRef = useRef(new Set<string>());
+  const pointerRef = useRef({ x: VIEW_W / 2, y: VIEW_H / 2, inside: false });
   const outcomeSent = useRef(false);
   const dragRef = useRef({
     active: false,
@@ -872,6 +977,7 @@ function GameScene({
   });
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [speed, setSpeed] = useState<1 | 2 | 3 | 4>(1);
   const [hover, setHover] = useState<{
     target: HoverTarget;
     x: number;
@@ -915,8 +1021,37 @@ function GameScene({
       if (!active) return;
       const dt = Math.min(0.034, (now - last) / 1000);
       last = now;
-      if (!pausedRef.current) updateGame(stateRef.current, dt);
-      renderGame(ctx, imagesRef.current!, stateRef.current, dragRef.current);
+      const keys = keysRef.current;
+      const pointer = pointerRef.current;
+      let panX = 0;
+      let panY = 0;
+      if (keys.has("KeyA") || keys.has("ArrowLeft") || (pointer.inside && pointer.x < 24)) panX -= 1;
+      if (keys.has("KeyD") || keys.has("ArrowRight") || (pointer.inside && pointer.x > VIEW_W - 24)) panX += 1;
+      if (keys.has("KeyW") || keys.has("ArrowUp") || (pointer.inside && pointer.y < 24)) panY -= 1;
+      if (keys.has("KeyS") || keys.has("ArrowDown") || (pointer.inside && pointer.y > VIEW_H - 24)) panY += 1;
+      if (panX || panY) {
+        const length = Math.hypot(panX, panY);
+        cameraRef.current.x += (panX / length) * 760 * dt;
+        cameraRef.current.y += (panY / length) * 760 * dt;
+        clampCamera(cameraRef.current);
+        if (stateRef.current.tutorialStep === 6) {
+          stateRef.current.tutorialStep = 7;
+        }
+      }
+      if (!pausedRef.current) {
+        for (let tick = 0; tick < speedRef.current; tick += 1) {
+          updateGame(stateRef.current, dt);
+        }
+      }
+      renderGame(
+        ctx,
+        imagesRef.current!,
+        stateRef.current,
+        cameraRef.current,
+        dragRef.current,
+      );
+      const minimapCtx = minimapRef.current?.getContext("2d");
+      if (minimapCtx) renderMinimap(minimapCtx, stateRef.current, cameraRef.current);
 
       hudClock += dt;
       saveClock += dt;
@@ -953,7 +1088,7 @@ function GameScene({
 
     const pointerDown = (event: PointerEvent) => {
       if (event.button !== 0 || pausedRef.current) return;
-      const point = worldPoint(canvas, event.clientX, event.clientY);
+      const point = worldPoint(canvas, cameraRef.current, event.clientX, event.clientY);
       if (stateRef.current.buildMode) {
         placeBuilding(stateRef.current, point.x, point.y);
         refreshHud();
@@ -971,7 +1106,12 @@ function GameScene({
     };
 
     const pointerMove = (event: PointerEvent) => {
-      const point = worldPoint(canvas, event.clientX, event.clientY);
+      const point = worldPoint(canvas, cameraRef.current, event.clientX, event.clientY);
+      pointerRef.current = {
+        x: point.x - cameraRef.current.x,
+        y: point.y - cameraRef.current.y,
+        inside: true,
+      };
       if (dragRef.current.active) {
         dragRef.current.x = point.x;
         dragRef.current.y = point.y;
@@ -989,7 +1129,7 @@ function GameScene({
 
     const pointerUp = (event: PointerEvent) => {
       if (!dragRef.current.active) return;
-      const point = worldPoint(canvas, event.clientX, event.clientY);
+      const point = worldPoint(canvas, cameraRef.current, event.clientX, event.clientY);
       const drag = dragRef.current;
       const moved = Math.hypot(point.x - drag.startX, point.y - drag.startY);
       if (moved > 12) {
@@ -1019,7 +1159,7 @@ function GameScene({
     const contextMenu = (event: MouseEvent) => {
       event.preventDefault();
       if (pausedRef.current) return;
-      const point = worldPoint(canvas, event.clientX, event.clientY);
+      const point = worldPoint(canvas, cameraRef.current, event.clientX, event.clientY);
       issueCommand(stateRef.current, point.x, point.y);
       refreshHud();
     };
@@ -1028,16 +1168,29 @@ function GameScene({
     canvas.addEventListener("pointermove", pointerMove);
     canvas.addEventListener("pointerup", pointerUp);
     canvas.addEventListener("contextmenu", contextMenu);
+    const pointerLeave = () => {
+      pointerRef.current.inside = false;
+    };
+    canvas.addEventListener("pointerleave", pointerLeave);
     return () => {
       canvas.removeEventListener("pointerdown", pointerDown);
       canvas.removeEventListener("pointermove", pointerMove);
       canvas.removeEventListener("pointerup", pointerUp);
       canvas.removeEventListener("contextmenu", contextMenu);
+      canvas.removeEventListener("pointerleave", pointerLeave);
     };
   }, [refreshHud, settings.tooltips]);
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
+      if (
+        ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(
+          event.code,
+        )
+      ) {
+        keysRef.current.add(event.code);
+        event.preventDefault();
+      }
       if (event.code === "Digit1") {
         stateRef.current.selectedBuildingId = undefined;
         stateRef.current.selectedUnitIds = stateRef.current.units
@@ -1078,8 +1231,15 @@ function GameScene({
         }
       }
     };
+    const keyUp = (event: KeyboardEvent) => {
+      keysRef.current.delete(event.code);
+    };
     window.addEventListener("keydown", keyDown);
-    return () => window.removeEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
+    return () => {
+      window.removeEventListener("keydown", keyDown);
+      window.removeEventListener("keyup", keyUp);
+    };
   }, [refreshHud]);
 
   const handlePause = () => {
@@ -1094,15 +1254,29 @@ function GameScene({
     beginBuild(stateRef.current, kind);
     refreshHud();
   };
+  const handleAutoFarm = () => {
+    setAutoFarm(stateRef.current, !stateRef.current.autoFarm);
+    refreshHud();
+  };
+  const handleSpeed = (next: 1 | 2 | 3 | 4) => {
+    speedRef.current = next;
+    setSpeed(next);
+  };
   const skipTutorial = () => {
-    stateRef.current.tutorialStep = 6;
+    stateRef.current.tutorialStep = 7;
     stateRef.current.tutorialEnabled = false;
     refreshHud();
   };
 
   const waveLabel =
-    hud.wave >= hud.totalWaves
-      ? t("finalWave")
+    hud.mode === "endless"
+      ? `${t("wave")} ${Math.max(1, hud.wave)} · ${Math.floor(hud.elapsed / 60)
+          .toString()
+          .padStart(2, "0")}:${Math.floor(hud.elapsed % 60)
+          .toString()
+          .padStart(2, "0")}`
+      : hud.wave >= hud.totalWaves
+        ? t("finalWave")
       : hud.waveActive
         ? `${t("wave")} ${hud.wave}/${hud.totalWaves}`
         : `${t("preparing")} · ${Math.max(0, Math.ceil(hud.waveClock))}s`;
@@ -1126,14 +1300,31 @@ function GameScene({
         </div>
 
         <div className="wave-status">
-          <small>{t("missionName")}</small>
+          <small>
+            {hud.mode === "stage"
+              ? `${t("stageMode")} · ${t("level")} ${hud.level}`
+              : t("endlessMode")}
+          </small>
           <strong>{waveLabel}</strong>
           <span>
+            {hud.bossAlive ? `${t("boss")} · ` : ""}
             {t("enemiesLeft")}: {hud.enemies}
           </span>
         </div>
 
         <div className="hud-actions">
+          <div className="speed-controls" aria-label={t("gameSpeed")}>
+            {([1, 2, 3, 4] as const).map((value) => (
+              <button
+                key={value}
+                className={speed === value ? "active" : ""}
+                onClick={() => handleSpeed(value)}
+                data-tip={`${t("gameSpeed")} ${value}x`}
+              >
+                {value}x
+              </button>
+            ))}
+          </div>
           <button onClick={handlePause} data-tip={t("pause")} aria-label={t("pause")}>
             {paused ? "▶" : "Ⅱ"}
           </button>
@@ -1154,10 +1345,28 @@ function GameScene({
         <canvas
           ref={canvasRef}
           className="battlefield"
-          width={WORLD_W}
-          height={WORLD_H}
+          width={VIEW_W}
+          height={VIEW_H}
           aria-label="The Verdant Reach realtime strategy battlefield"
         />
+
+        <div className="minimap-frame paper-chip">
+          <canvas
+            ref={minimapRef}
+            width={240}
+            height={160}
+            aria-label={t("worldMap")}
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              cameraRef.current.x =
+                ((event.clientX - rect.left) / rect.width) * WORLD_W - VIEW_W / 2;
+              cameraRef.current.y =
+                ((event.clientY - rect.top) / rect.height) * WORLD_H - VIEW_H / 2;
+              clampCamera(cameraRef.current);
+            }}
+          />
+          <span>{t("worldMap")} · {t("clickToMoveCamera")}</span>
+        </div>
 
         <div className="castle-vitals paper-chip">
           <img src="/game-assets/buildings/castle.png" alt="" />
@@ -1181,24 +1390,28 @@ function GameScene({
 
         <div className="objective-scroll paper-chip">
           <strong>{t("objective")}</strong>
-          <span>{t("objectiveText")}</span>
+          <span>
+            {hud.mode === "stage" ? t("stageObjective") : t("endlessObjective")}
+            {" · "}
+            {t("nests")}: {hud.nestsAlive}
+          </span>
         </div>
 
-        {hud.tutorialEnabled && hud.tutorialStep <= 6 && (
+        {hud.tutorialEnabled && hud.tutorialStep <= 7 && (
           <div className="tutorial-scroll paper-panel">
             <span className="tutorial-number">
-              {hud.tutorialStep < 6 ? hud.tutorialStep + 1 : "✓"}
+              {hud.tutorialStep < 7 ? hud.tutorialStep + 1 : "✓"}
             </span>
             <div>
               <small>{t("firstSteps")}</small>
               <strong>
                 {t(
-                  (hud.tutorialStep < 6
+                  (hud.tutorialStep < 7
                     ? `tutorial${hud.tutorialStep}`
                     : "tutorialDone") as CopyKey,
                 )}
               </strong>
-              {hud.tutorialStep < 6 && (
+              {hud.tutorialStep < 7 && (
                 <button onClick={skipTutorial}>{t("skipTutorial")}</button>
               )}
             </div>
@@ -1241,7 +1454,9 @@ function GameScene({
             )}
             {hover.target.amount !== undefined && (
               <small>
-                {t("resourceRemaining")}: {hover.target.amount}
+                {hover.target.amount > 0
+                  ? `${t("resourceRemaining")}: ${hover.target.amount}`
+                  : `${t("respawnIn")}: ${Math.ceil(hover.target.respawnClock ?? 0)}s`}
               </small>
             )}
           </div>
@@ -1268,7 +1483,8 @@ function GameScene({
               </PaperButton>
               <PaperButton
                 onClick={() => {
-                  stateRef.current = createInitialGame(settings.tutorial);
+                  stateRef.current = createInitialGame(settings.tutorial, mode, level);
+                  cameraRef.current = createCamera(stateRef.current);
                   outcomeSent.current = false;
                   pausedRef.current = false;
                   setPaused(false);
@@ -1291,6 +1507,7 @@ function GameScene({
           t={t}
           onTrain={handleTrain}
           onBuild={handleBuild}
+          onAutoFarm={handleAutoFarm}
         />
         <div className="control-hints">
           <span>
@@ -1301,6 +1518,7 @@ function GameScene({
           </span>
           <span>Space · {t("pause")}</span>
           <span>1 · Pawn &nbsp; 2 · Army &nbsp; C · Castle</span>
+          <span>WASD / Arrows · {t("moveCamera")}</span>
         </div>
       </footer>
     </main>
@@ -1310,12 +1528,18 @@ function GameScene({
 function ResultScreen({
   locale,
   outcome,
+  mode,
+  level,
   onRestart,
+  onNext,
   onMenu,
 }: {
   locale: Locale;
   outcome: "victory" | "defeat";
+  mode: GameMode;
+  level: number;
   onRestart: () => void;
+  onNext: () => void;
   onMenu: () => void;
 }) {
   const t = translator(locale);
@@ -1336,6 +1560,11 @@ function ResultScreen({
           {outcome === "victory" ? t("victory") : t("defeat")}
         </RibbonTitle>
         <p>{outcome === "victory" ? t("victoryText") : t("defeatText")}</p>
+        {outcome === "victory" && mode === "stage" && (
+          <PaperButton tone="red" onClick={onNext}>
+            {t("nextStage")} · {t("level")} {level + 1}
+          </PaperButton>
+        )}
         <PaperButton tone="red" onClick={onRestart}>
           {t("restart")}
         </PaperButton>
@@ -1351,6 +1580,8 @@ export default function GameApp() {
   const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS);
   const [hasSave, setHasSave] = useState(false);
   const [resumeSaved, setResumeSaved] = useState(false);
+  const [activeMode, setActiveMode] = useState<GameMode>("stage");
+  const [activeLevel, setActiveLevel] = useState(1);
   const [runId, setRunId] = useState(0);
 
   useEffect(() => {
@@ -1384,16 +1615,32 @@ export default function GameApp() {
   }, []);
 
   const newGame = useCallback(() => {
-    localStorage.removeItem(SAVE_KEY);
-    setHasSave(false);
-    setResumeSaved(false);
+    setScreen("modes");
+  }, []);
+
+  const continueGame = useCallback(() => {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as Pick<GameState, "mode" | "level">;
+      if (saved.mode === "stage" || saved.mode === "endless") {
+        setActiveMode(saved.mode);
+      }
+      if (Number.isFinite(saved.level)) setActiveLevel(Math.max(1, saved.level));
+    } catch {
+      return;
+    }
+    setResumeSaved(true);
     setRunId((id) => id + 1);
     setScreen("game");
   }, []);
 
-  const continueGame = useCallback(() => {
-    if (!localStorage.getItem(SAVE_KEY)) return;
-    setResumeSaved(true);
+  const startMode = useCallback((mode: GameMode) => {
+    localStorage.removeItem(SAVE_KEY);
+    setHasSave(false);
+    setResumeSaved(false);
+    setActiveMode(mode);
+    setActiveLevel(1);
     setRunId((id) => id + 1);
     setScreen("game");
   }, []);
@@ -1404,6 +1651,15 @@ export default function GameApp() {
 
   if (screen === "how") {
     return <HowScreen locale={locale} onBack={() => setScreen("menu")} />;
+  }
+  if (screen === "modes") {
+    return (
+      <ModeScreen
+        locale={locale}
+        onChoose={startMode}
+        onBack={() => setScreen("menu")}
+      />
+    );
   }
   if (screen === "settings") {
     return (
@@ -1426,6 +1682,8 @@ export default function GameApp() {
         locale={locale}
         settings={settings}
         resumeSaved={resumeSaved}
+        mode={activeMode}
+        level={activeLevel}
         onExit={() => {
           setHasSave(Boolean(localStorage.getItem(SAVE_KEY)));
           setScreen("menu");
@@ -1443,7 +1701,17 @@ export default function GameApp() {
       <ResultScreen
         locale={locale}
         outcome={screen}
-        onRestart={newGame}
+        mode={activeMode}
+        level={activeLevel}
+        onRestart={() => startMode(activeMode)}
+        onNext={() => {
+          localStorage.removeItem(SAVE_KEY);
+          setActiveMode("stage");
+          setActiveLevel((current) => current + 1);
+          setResumeSaved(false);
+          setRunId((id) => id + 1);
+          setScreen("game");
+        }}
         onMenu={() => setScreen("menu")}
       />
     );

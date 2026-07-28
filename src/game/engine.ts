@@ -1,9 +1,14 @@
 import type { AssetKey, ImageBank } from "./assets";
 
-export const WORLD_W = 1280;
-export const WORLD_H = 768;
+export const VIEW_W = 1280;
+export const VIEW_H = 720;
+export const WORLD_W = 3072;
+export const WORLD_H = 2048;
 export const TILE = 64;
+const COLS = WORLD_W / TILE;
+const ROWS = WORLD_H / TILE;
 
+export type GameMode = "stage" | "endless";
 export type ResourceKind = "wood" | "gold" | "meat";
 export type PlayerUnitKind = "pawn" | "warrior" | "lancer" | "archer" | "monk";
 export type EnemyKind =
@@ -13,7 +18,8 @@ export type EnemyKind =
   | "thief"
   | "skull"
   | "panda"
-  | "minotaur";
+  | "minotaur"
+  | "troll";
 export type UnitKind = PlayerUnitKind | EnemyKind;
 export type PlayerBuildingKind =
   | "castle"
@@ -31,7 +37,19 @@ export type UnitAction =
   | "return"
   | "attack"
   | "heal"
-  | "guard";
+  | "guard"
+  | "windup"
+  | "recovery";
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+export interface Camera {
+  x: number;
+  y: number;
+}
 
 export interface Unit {
   id: number;
@@ -48,6 +66,9 @@ export interface Unit {
   anim: number;
   attackClock: number;
   healClock: number;
+  specialClock: number;
+  pathClock: number;
+  path: Point[];
   targetUnitId?: number;
   targetBuildingId?: number;
   targetResourceId?: number;
@@ -56,6 +77,7 @@ export interface Unit {
   gatherClock: number;
   carrying?: ResourceKind;
   carryAmount: number;
+  boss?: boolean;
 }
 
 export interface TrainingOrder {
@@ -75,6 +97,9 @@ export interface Building {
   queue?: TrainingOrder;
   attackClock: number;
   construction: number;
+  variant: number;
+  respawnClock: number;
+  cleared: boolean;
 }
 
 export interface ResourceNode {
@@ -85,6 +110,8 @@ export interface ResourceNode {
   amount: number;
   maxAmount: number;
   variant: number;
+  respawnClock: number;
+  respawnDelay: number;
 }
 
 export interface Projectile {
@@ -111,10 +138,14 @@ export type NoticeKey =
   | "insufficient"
   | "invalidPlacement"
   | "autoSaved"
+  | "autoFarmOn"
+  | "autoFarmOff"
   | null;
 
 export interface GameState {
-  version: 2;
+  version: 3;
+  mode: GameMode;
+  level: number;
   time: number;
   resources: Record<ResourceKind, number>;
   units: Unit[];
@@ -132,8 +163,11 @@ export interface GameState {
   totalWaves: number;
   waveClock: number;
   waveActive: boolean;
+  bossSpawned: boolean;
   tutorialStep: number;
   tutorialEnabled: boolean;
+  autoFarm: boolean;
+  nestsCleared: number;
   outcome: "playing" | "victory" | "defeat";
   notice: NoticeKey;
   noticeAge: number;
@@ -153,6 +187,8 @@ export interface HoverTarget {
   hp?: number;
   maxHp?: number;
   amount?: number;
+  respawnClock?: number;
+  boss?: boolean;
 }
 
 interface UnitSpec {
@@ -172,31 +208,34 @@ interface BuildingSpec {
   frame?: number;
 }
 
+type TerrainKind = "water" | "grass" | "deep" | "autumn" | "road" | "bridge" | "hill";
+
 export const UNIT_SPEC: Record<UnitKind, UnitSpec> = {
-  pawn: { hp: 80, speed: 90, damage: 4, range: 36, cooldown: 1.3, frame: 192, scale: 0.5 },
-  warrior: { hp: 190, speed: 93, damage: 27, range: 48, cooldown: 0.82, frame: 192, scale: 0.56 },
-  lancer: { hp: 310, speed: 75, damage: 22, range: 62, cooldown: 1, frame: 320, scale: 0.39 },
-  archer: { hp: 120, speed: 88, damage: 22, range: 230, cooldown: 1.15, frame: 192, scale: 0.52 },
-  monk: { hp: 130, speed: 86, damage: 8, range: 140, cooldown: 1.4, frame: 192, scale: 0.52 },
-  gnome: { hp: 68, speed: 80, damage: 11, range: 38, cooldown: 0.85, frame: 192, scale: 0.5 },
-  goblin: { hp: 105, speed: 72, damage: 16, range: 56, cooldown: 1, frame: 192, scale: 0.54 },
-  gnoll: { hp: 145, speed: 66, damage: 22, range: 180, cooldown: 1.35, frame: 192, scale: 0.57 },
-  thief: { hp: 96, speed: 112, damage: 17, range: 38, cooldown: 0.68, frame: 192, scale: 0.5 },
-  skull: { hp: 170, speed: 61, damage: 23, range: 44, cooldown: 1.05, frame: 192, scale: 0.55 },
-  panda: { hp: 240, speed: 64, damage: 26, range: 48, cooldown: 1.05, frame: 192, scale: 0.6 },
-  minotaur: { hp: 620, speed: 55, damage: 48, range: 70, cooldown: 1.5, frame: 320, scale: 0.48 },
+  pawn: { hp: 80, speed: 96, damage: 4, range: 36, cooldown: 1.3, frame: 192, scale: 0.54 },
+  warrior: { hp: 190, speed: 96, damage: 27, range: 48, cooldown: 0.82, frame: 192, scale: 0.6 },
+  lancer: { hp: 310, speed: 78, damage: 22, range: 68, cooldown: 1, frame: 320, scale: 0.42 },
+  archer: { hp: 120, speed: 91, damage: 22, range: 245, cooldown: 1.15, frame: 192, scale: 0.56 },
+  monk: { hp: 130, speed: 89, damage: 8, range: 150, cooldown: 1.4, frame: 192, scale: 0.56 },
+  gnome: { hp: 68, speed: 86, damage: 11, range: 40, cooldown: 0.85, frame: 192, scale: 0.54 },
+  goblin: { hp: 105, speed: 77, damage: 16, range: 58, cooldown: 1, frame: 192, scale: 0.58 },
+  gnoll: { hp: 145, speed: 70, damage: 22, range: 190, cooldown: 1.35, frame: 192, scale: 0.61 },
+  thief: { hp: 96, speed: 118, damage: 17, range: 40, cooldown: 0.68, frame: 192, scale: 0.54 },
+  skull: { hp: 170, speed: 65, damage: 23, range: 46, cooldown: 1.05, frame: 192, scale: 0.59 },
+  panda: { hp: 240, speed: 68, damage: 26, range: 50, cooldown: 1.05, frame: 256, scale: 0.48 },
+  minotaur: { hp: 620, speed: 59, damage: 48, range: 76, cooldown: 1.5, frame: 320, scale: 0.52 },
+  troll: { hp: 1450, speed: 48, damage: 82, range: 92, cooldown: 3.2, frame: 384, scale: 0.58 },
 };
 
 export const BUILDING_SPEC: Record<BuildingKind, BuildingSpec> = {
-  castle: { hp: 1500, asset: "castle", scale: 0.78 },
-  house: { hp: 420, asset: "house1", scale: 0.68 },
-  barracks: { hp: 720, asset: "barracks", scale: 0.64 },
-  archery: { hp: 620, asset: "archery", scale: 0.62 },
-  monastery: { hp: 600, asset: "monastery", scale: 0.57 },
-  tower: { hp: 760, asset: "tower", scale: 0.69 },
-  cave: { hp: 1300, asset: "cave", scale: 0.9, frame: 192 },
-  goblinHouse: { hp: 540, asset: "goblinHouse", scale: 0.62 },
-  goblinTower: { hp: 680, asset: "goblinTower", scale: 0.55 },
+  castle: { hp: 1700, asset: "castle", scale: 0.82 },
+  house: { hp: 440, asset: "house1", scale: 0.72 },
+  barracks: { hp: 760, asset: "barracks", scale: 0.68 },
+  archery: { hp: 660, asset: "archery", scale: 0.66 },
+  monastery: { hp: 640, asset: "monastery", scale: 0.61 },
+  tower: { hp: 800, asset: "tower", scale: 0.73 },
+  cave: { hp: 1500, asset: "cave", scale: 0.96, frame: 192 },
+  goblinHouse: { hp: 620, asset: "goblinHouse", scale: 0.68 },
+  goblinTower: { hp: 760, asset: "goblinTower", scale: 0.61 },
 };
 
 export const UNIT_COST: Record<
@@ -236,21 +275,191 @@ const ENEMY_SPRITES: Record<
   thief: { idle: "thiefIdle", run: "thiefRun", action: "thiefAttack" },
   skull: { idle: "skullIdle", run: "skullRun", action: "skullAttack" },
   panda: { idle: "pandaIdle", run: "pandaRun", action: "pandaAttack" },
-  minotaur: {
-    idle: "minotaurIdle",
-    run: "minotaurRun",
-    action: "minotaurAttack",
-  },
+  minotaur: { idle: "minotaurIdle", run: "minotaurRun", action: "minotaurAttack" },
+  troll: { idle: "trollIdle", run: "trollRun", action: "trollAttack" },
 };
 
-const PLAYER_SPAWN = { x: 290, y: 590 };
-const ENEMY_SPAWN = { x: 1120, y: 205 };
-
-const islandRects = [
-  { x: 0, y: 128, w: 15 * TILE, h: 10 * TILE },
-  { x: 832, y: 256, w: 4 * TILE, h: 4 * TILE },
-  { x: 896, y: 0, w: 6 * TILE, h: 8 * TILE },
+const PLAYER_SPAWN = { x: 650, y: 1510 };
+const ENEMY_SPAWNS = [
+  { x: 2600, y: 360 },
+  { x: 2580, y: 1060 },
+  { x: 2680, y: 1570 },
 ];
+
+const HILLS = [
+  { c: 9, r: 3, w: 7, h: 4 },
+  { c: 29, r: 18, w: 7, h: 4 },
+  { c: 36, r: 8, w: 5, h: 3 },
+];
+
+const ROADS = [
+  { c1: 5, r1: 23, c2: 24, r2: 24 },
+  { c1: 23, r1: 8, c2: 42, r2: 9 },
+  { c1: 15, r1: 14, c2: 19, r2: 15 },
+];
+
+const BRIDGES = [
+  { c1: 22, r1: 8, c2: 24, r2: 9 },
+  { c1: 22, r1: 23, c2: 24, r2: 24 },
+  { c1: 7, r1: 14, c2: 12, r2: 15 },
+];
+
+function inside(c: number, r: number, rect: { c: number; r: number; w: number; h: number }) {
+  return c >= rect.c && c < rect.c + rect.w && r >= rect.r && r < rect.r + rect.h;
+}
+
+function inRange(c: number, r: number, rect: { c1: number; r1: number; c2: number; r2: number }) {
+  return c >= rect.c1 && c <= rect.c2 && r >= rect.r1 && r <= rect.r2;
+}
+
+function terrainAtCell(c: number, r: number): TerrainKind {
+  if (c < 2 || r < 2 || c >= COLS - 2 || r >= ROWS - 2) return "water";
+  const bridge = BRIDGES.some((rect) => inRange(c, r, rect));
+  if (bridge) return "bridge";
+  const river = c >= 22 && c <= 24 && r >= 2 && r < ROWS - 2;
+  const lake = c >= 7 && c <= 12 && r >= 12 && r <= 17;
+  const northInlet = c >= 34 && c <= 40 && r >= 2 && r <= 6;
+  const southCove = c >= 35 && c <= 42 && r >= 26 && r < ROWS - 2;
+  if (river || lake || northInlet || southCove) return "water";
+  if (HILLS.some((rect) => inside(c, r, rect))) return "hill";
+  if (ROADS.some((rect) => inRange(c, r, rect))) return "road";
+  if ((c > 25 && r < 12) || (c > 38 && r < 20)) return "autumn";
+  if (r < 9 || (c > 26 && r > 17)) return "deep";
+  return "grass";
+}
+
+function cellWalkable(c: number, r: number) {
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
+  const kind = terrainAtCell(c, r);
+  return kind !== "water" && kind !== "hill";
+}
+
+export function isWalkable(x: number, y: number, padding = 18) {
+  const samples = [
+    [x, y],
+    [x - padding, y - padding],
+    [x + padding, y - padding],
+    [x - padding, y + padding],
+    [x + padding, y + padding],
+  ];
+  return samples.every(([sx, sy]) =>
+    cellWalkable(Math.floor(sx / TILE), Math.floor(sy / TILE)),
+  );
+}
+
+export function clampCamera(camera: Camera) {
+  camera.x = Math.max(0, Math.min(WORLD_W - VIEW_W, camera.x));
+  camera.y = Math.max(0, Math.min(WORLD_H - VIEW_H, camera.y));
+}
+
+export function createCamera(state: GameState): Camera {
+  const castle = state.buildings.find((building) => building.kind === "castle");
+  const camera = {
+    x: (castle?.x ?? PLAYER_SPAWN.x) - VIEW_W * 0.43,
+    y: (castle?.y ?? PLAYER_SPAWN.y) - VIEW_H * 0.62,
+  };
+  clampCamera(camera);
+  return camera;
+}
+
+function nearestWalkableCell(c: number, r: number) {
+  if (cellWalkable(c, r)) return { c, r };
+  for (let radius = 1; radius < 12; radius += 1) {
+    for (let y = r - radius; y <= r + radius; y += 1) {
+      for (let x = c - radius; x <= c + radius; x += 1) {
+        if (
+          (Math.abs(x - c) === radius || Math.abs(y - r) === radius) &&
+          cellWalkable(x, y)
+        ) {
+          return { c: x, r: y };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function findPath(startX: number, startY: number, targetX: number, targetY: number): Point[] {
+  const start = nearestWalkableCell(Math.floor(startX / TILE), Math.floor(startY / TILE));
+  const goal = nearestWalkableCell(Math.floor(targetX / TILE), Math.floor(targetY / TILE));
+  if (!start || !goal) return [];
+  const startKey = start.r * COLS + start.c;
+  const goalKey = goal.r * COLS + goal.c;
+  if (startKey === goalKey) return [{ x: targetX, y: targetY }];
+
+  const open = [startKey];
+  const came = new Map<number, number>();
+  const g = new Map<number, number>([[startKey, 0]]);
+  const f = new Map<number, number>([
+    [startKey, Math.hypot(goal.c - start.c, goal.r - start.r)],
+  ]);
+  const inOpen = new Set(open);
+  const directions = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ];
+
+  while (open.length) {
+    let bestIndex = 0;
+    for (let index = 1; index < open.length; index += 1) {
+      if ((f.get(open[index]) ?? Infinity) < (f.get(open[bestIndex]) ?? Infinity)) {
+        bestIndex = index;
+      }
+    }
+    const current = open.splice(bestIndex, 1)[0];
+    inOpen.delete(current);
+    if (current === goalKey) {
+      const keys = [current];
+      let cursor = current;
+      while (came.has(cursor)) {
+        cursor = came.get(cursor)!;
+        keys.push(cursor);
+      }
+      keys.reverse();
+      const points = keys.slice(1).map((key) => ({
+        x: (key % COLS) * TILE + TILE / 2,
+        y: Math.floor(key / COLS) * TILE + TILE / 2,
+      }));
+      points.push({
+        x: cellWalkable(Math.floor(targetX / TILE), Math.floor(targetY / TILE))
+          ? targetX
+          : goal.c * TILE + TILE / 2,
+        y: cellWalkable(Math.floor(targetX / TILE), Math.floor(targetY / TILE))
+          ? targetY
+          : goal.r * TILE + TILE / 2,
+      });
+      return points;
+    }
+
+    const cc = current % COLS;
+    const cr = Math.floor(current / COLS);
+    for (const [dc, dr] of directions) {
+      const nc = cc + dc;
+      const nr = cr + dr;
+      if (!cellWalkable(nc, nr)) continue;
+      if (dc && dr && (!cellWalkable(cc + dc, cr) || !cellWalkable(cc, cr + dr))) {
+        continue;
+      }
+      const neighbor = nr * COLS + nc;
+      const tentative = (g.get(current) ?? Infinity) + (dc && dr ? 1.414 : 1);
+      if (tentative >= (g.get(neighbor) ?? Infinity)) continue;
+      came.set(neighbor, current);
+      g.set(neighbor, tentative);
+      f.set(neighbor, tentative + Math.hypot(goal.c - nc, goal.r - nr));
+      if (!inOpen.has(neighbor)) {
+        open.push(neighbor);
+        inOpen.add(neighbor);
+      }
+    }
+  }
+  return [];
+}
 
 function nextId(state: GameState) {
   const id = state.nextId;
@@ -268,8 +477,10 @@ function createUnit(
   team: "player" | "enemy",
   x: number,
   y: number,
+  level = 1,
 ): Unit {
   const spec = UNIT_SPEC[kind];
+  const difficulty = team === "enemy" ? 1 + Math.max(0, level - 1) * 0.16 : 1;
   return {
     id,
     kind,
@@ -278,13 +489,16 @@ function createUnit(
     y,
     targetX: x,
     targetY: y,
-    hp: spec.hp,
-    maxHp: spec.hp,
+    hp: Math.round(spec.hp * difficulty),
+    maxHp: Math.round(spec.hp * difficulty),
     action: kind === "lancer" ? "guard" : "idle",
     facing: team === "player" ? 1 : -1,
     anim: Math.random() * 1.8,
     attackClock: Math.random() * 0.3,
     healClock: 0,
+    specialClock: 0,
+    pathClock: 0,
+    path: [],
     gatherClock: 0,
     carryAmount: 0,
   };
@@ -296,6 +510,7 @@ function createBuilding(
   team: "player" | "enemy",
   x: number,
   y: number,
+  variant = 0,
 ): Building {
   const spec = BUILDING_SPEC[kind];
   return {
@@ -308,27 +523,63 @@ function createBuilding(
     maxHp: spec.hp,
     attackClock: 0,
     construction: 1,
+    variant,
+    respawnClock: 0,
+    cleared: false,
   };
 }
 
-export function createInitialGame(tutorialEnabled = true): GameState {
+function createNode(
+  id: number,
+  kind: ResourceKind,
+  x: number,
+  y: number,
+  amount: number,
+  variant: number,
+): ResourceNode {
+  return {
+    id,
+    kind,
+    x,
+    y,
+    amount,
+    maxAmount: amount,
+    variant,
+    respawnClock: 0,
+    respawnDelay: kind === "wood" ? 48 : kind === "gold" ? 65 : 38,
+  };
+}
+
+export function createInitialGame(
+  tutorialEnabled = true,
+  mode: GameMode = "stage",
+  level = 1,
+): GameState {
   const state: GameState = {
-    version: 2,
+    version: 3,
+    mode,
+    level,
     time: 0,
-    resources: { wood: 170, gold: 125, meat: 135 },
+    resources:
+      mode === "endless"
+        ? { wood: 260, gold: 185, meat: 190 }
+        : { wood: 190, gold: 140, meat: 155 },
     units: [],
     buildings: [],
     nodes: [],
     projectiles: [],
     effects: [],
     selectedUnitIds: [],
-    populationCap: 8,
+    populationCap: mode === "endless" ? 18 : 12,
     wave: 0,
-    totalWaves: 3,
-    waveClock: 45,
+    totalWaves: mode === "stage" ? Math.min(6, 4 + Math.max(0, level - 1)) : 0,
+    waveClock: mode === "stage" ? 48 : 34,
     waveActive: false,
-    tutorialStep: tutorialEnabled ? 0 : 6,
+    bossSpawned: false,
+    tutorialStep: tutorialEnabled ? 0 : 7,
     tutorialEnabled,
+    autoFarm: mode === "endless",
+    nestsCleared: 0,
     outcome: "playing",
     notice: null,
     noticeAge: 0,
@@ -336,35 +587,65 @@ export function createInitialGame(tutorialEnabled = true): GameState {
   };
 
   state.buildings = [
-    createBuilding(1, "castle", "player", 225, 545),
-    createBuilding(2, "house", "player", 385, 705),
-    createBuilding(3, "barracks", "player", 485, 535),
-    createBuilding(4, "archery", "player", 620, 605),
-    createBuilding(5, "monastery", "player", 480, 330),
-    createBuilding(6, "tower", "player", 110, 405),
-    createBuilding(100, "cave", "enemy", 1135, 175),
-    createBuilding(101, "goblinHouse", "enemy", 1020, 345),
-    createBuilding(102, "goblinTower", "enemy", 1200, 430),
+    createBuilding(1, "castle", "player", 560, 1515),
+    createBuilding(2, "house", "player", 345, 1680, 0),
+    createBuilding(3, "barracks", "player", 800, 1560),
+    createBuilding(4, "tower", "player", 955, 1380),
+    createBuilding(100, "cave", "enemy", 2660, 345),
+    createBuilding(101, "goblinHouse", "enemy", 2570, 1030),
+    createBuilding(102, "goblinTower", "enemy", 2720, 1570),
   ];
+  if (mode === "endless") {
+    state.buildings.push(
+      createBuilding(5, "archery", "player", 565, 1795),
+      createBuilding(6, "monastery", "player", 1040, 1650),
+      createBuilding(7, "house", "player", 330, 1450, 2),
+    );
+  }
 
   state.units = [
-    createUnit(10, "pawn", "player", 300, 620),
-    createUnit(11, "pawn", "player", 360, 610),
-    createUnit(12, "warrior", "player", 430, 650),
-    createUnit(13, "lancer", "player", 500, 690),
+    createUnit(10, "pawn", "player", 610, 1580),
+    createUnit(11, "pawn", "player", 680, 1570),
+    createUnit(12, "warrior", "player", 790, 1670),
+    createUnit(13, "lancer", "player", 880, 1690),
   ];
+  if (mode === "endless") {
+    state.units.push(
+      createUnit(14, "pawn", "player", 720, 1610),
+      createUnit(15, "archer", "player", 930, 1710),
+      createUnit(16, "monk", "player", 850, 1760),
+    );
+  }
 
-  state.nodes = [
-    { id: 200, kind: "wood", x: 700, y: 350, amount: 120, maxAmount: 120, variant: 0 },
-    { id: 201, kind: "wood", x: 765, y: 405, amount: 120, maxAmount: 120, variant: 1 },
-    { id: 202, kind: "wood", x: 690, y: 475, amount: 120, maxAmount: 120, variant: 2 },
-    { id: 203, kind: "wood", x: 815, y: 540, amount: 120, maxAmount: 120, variant: 3 },
-    { id: 210, kind: "gold", x: 690, y: 670, amount: 105, maxAmount: 105, variant: 0 },
-    { id: 211, kind: "gold", x: 770, y: 690, amount: 105, maxAmount: 105, variant: 1 },
-    { id: 220, kind: "meat", x: 595, y: 710, amount: 80, maxAmount: 80, variant: 0 },
-    { id: 221, kind: "meat", x: 665, y: 585, amount: 80, maxAmount: 80, variant: 1 },
+  const nodes: Array<[ResourceKind, number, number, number]> = [
+    ["wood", 1120, 1430, 0],
+    ["wood", 1200, 1500, 1],
+    ["wood", 1080, 1610, 2],
+    ["wood", 1270, 1700, 3],
+    ["wood", 450, 1020, 1],
+    ["wood", 560, 940, 3],
+    ["wood", 1850, 470, 0],
+    ["wood", 1970, 550, 2],
+    ["wood", 2150, 1190, 1],
+    ["wood", 2230, 1280, 3],
+    ["wood", 1760, 1760, 0],
+    ["wood", 1890, 1830, 2],
+    ["gold", 1180, 1820, 0],
+    ["gold", 1320, 1800, 1],
+    ["gold", 490, 760, 2],
+    ["gold", 1780, 990, 0],
+    ["gold", 2310, 720, 2],
+    ["gold", 2380, 1770, 1],
+    ["meat", 960, 1810, 0],
+    ["meat", 1050, 1740, 1],
+    ["meat", 350, 1180, 0],
+    ["meat", 1830, 1360, 1],
+    ["meat", 2100, 810, 0],
+    ["meat", 2440, 1370, 1],
   ];
-
+  state.nodes = nodes.map(([kind, x, y, variant], index) =>
+    createNode(200 + index, kind, x, y, kind === "gold" ? 130 : kind === "meat" ? 90 : 150, variant),
+  );
   return state;
 }
 
@@ -373,7 +654,7 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
   try {
     const parsed = JSON.parse(raw) as GameState;
     if (
-      parsed.version !== 2 ||
+      parsed.version !== 3 ||
       !Array.isArray(parsed.units) ||
       !Array.isArray(parsed.buildings) ||
       !parsed.resources
@@ -381,7 +662,7 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
       return null;
     }
     parsed.tutorialEnabled = tutorialEnabled;
-    if (!tutorialEnabled) parsed.tutorialStep = 6;
+    if (!tutorialEnabled) parsed.tutorialStep = 7;
     parsed.selectedUnitIds = [];
     parsed.selectedBuildingId = undefined;
     parsed.buildMode = undefined;
@@ -391,6 +672,20 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
     parsed.noticeAge = 0;
     parsed.projectiles ??= [];
     parsed.effects ??= [];
+    parsed.nodes.forEach((node) => {
+      node.respawnClock ??= 0;
+      node.respawnDelay ??= node.kind === "wood" ? 48 : node.kind === "gold" ? 65 : 38;
+    });
+    parsed.units.forEach((unit) => {
+      unit.path ??= [];
+      unit.pathClock ??= 0;
+      unit.specialClock ??= 0;
+    });
+    parsed.buildings.forEach((building) => {
+      building.variant ??= 0;
+      building.respawnClock ??= 0;
+      building.cleared ??= false;
+    });
     parsed.outcome = "playing";
     return parsed;
   } catch {
@@ -417,16 +712,6 @@ export function population(state: GameState) {
   return state.units.filter((unit) => unit.team === "player" && unit.hp > 0).length;
 }
 
-export function isWalkable(x: number, y: number, padding = 22) {
-  return islandRects.some(
-    (rect) =>
-      x >= rect.x + padding &&
-      x <= rect.x + rect.w - padding &&
-      y >= rect.y + padding &&
-      y <= rect.y + rect.h - padding,
-  );
-}
-
 export function getBuildingSize(kind: BuildingKind) {
   const spec = BUILDING_SPEC[kind];
   const source =
@@ -442,9 +727,7 @@ export function getBuildingSize(kind: BuildingKind) {
               ? { w: 128, h: 256 }
               : kind === "goblinHouse"
                 ? { w: 192, h: 192 }
-                : kind === "goblinTower"
-                  ? { w: 192, h: 256 }
-                  : { w: 192, h: 256 };
+                : { w: 192, h: 256 };
   return { w: source.w * spec.scale, h: source.h * spec.scale };
 }
 
@@ -459,10 +742,7 @@ function canAfford(
   );
 }
 
-function spend(
-  state: GameState,
-  cost: { wood: number; gold: number; meat: number },
-) {
+function spend(state: GameState, cost: { wood: number; gold: number; meat: number }) {
   state.resources.wood -= cost.wood;
   state.resources.gold -= cost.gold;
   state.resources.meat -= cost.meat;
@@ -471,6 +751,11 @@ function spend(
 function setNotice(state: GameState, notice: Exclude<NoticeKey, null>) {
   state.notice = notice;
   state.noticeAge = 0;
+}
+
+export function setAutoFarm(state: GameState, enabled: boolean) {
+  state.autoFarm = enabled;
+  setNotice(state, enabled ? "autoFarmOn" : "autoFarmOff");
 }
 
 export function beginBuild(state: GameState, kind: "house" | "tower") {
@@ -496,19 +781,19 @@ export function setBuildHover(state: GameState, x: number, y: number) {
 }
 
 function placementIsValid(state: GameState, x: number, y: number) {
-  if (!isWalkable(x, y, 72)) return false;
-  if (x > 880) return false;
+  if (!isWalkable(x, y, 70)) return false;
+  if (terrainAtCell(Math.floor(x / TILE), Math.floor(y / TILE)) === "bridge") return false;
   if (
     state.buildings.some((building) => {
       if (building.hp <= 0) return false;
-      const a = getBuildingSize(building.kind);
-      return distance(x, y, building.x, building.y) < Math.max(84, (a.w + 100) * 0.48);
+      const size = getBuildingSize(building.kind);
+      return distance(x, y, building.x, building.y) < Math.max(95, (size.w + 118) * 0.48);
     })
   ) {
     return false;
   }
   return !state.nodes.some(
-    (node) => node.amount > 0 && distance(x, y, node.x, node.y) < 84,
+    (node) => node.amount > 0 && distance(x, y, node.x, node.y) < 92,
   );
 }
 
@@ -527,18 +812,11 @@ export function placeBuilding(state: GameState, x: number, y: number) {
     return false;
   }
   spend(state, BUILD_COST[kind]);
-  const building = createBuilding(nextId(state), kind, "player", x, y);
+  const building = createBuilding(nextId(state), kind, "player", x, y, state.nextId % 3);
   building.construction = 0;
   building.hp = Math.round(building.maxHp * 0.25);
   state.buildings.push(building);
-  state.effects.push({
-    id: nextId(state),
-    kind: "dust",
-    x,
-    y,
-    age: 0,
-    duration: 0.9,
-  });
+  addEffect(state, "dust", x, y, 0.9);
   if (kind === "house") state.populationCap += 4;
   state.selectedBuildingId = building.id;
   state.buildMode = undefined;
@@ -550,19 +828,16 @@ export function trainUnit(state: GameState, kind: PlayerUnitKind) {
     setNotice(state, "insufficient");
     return false;
   }
-
   const selected = state.buildings.find(
     (building) => building.id === state.selectedBuildingId && building.hp > 0,
   );
   if (!selected || selected.queue || selected.construction < 1) return false;
-
   const valid =
     (selected.kind === "castle" && kind === "pawn") ||
     (selected.kind === "barracks" && (kind === "warrior" || kind === "lancer")) ||
     (selected.kind === "archery" && kind === "archer") ||
     (selected.kind === "monastery" && kind === "monk");
   if (!valid) return false;
-
   const cost = UNIT_COST[kind];
   if (!canAfford(state, cost)) {
     setNotice(state, "insufficient");
@@ -575,14 +850,10 @@ export function trainUnit(state: GameState, kind: PlayerUnitKind) {
 }
 
 function hitUnit(state: GameState, x: number, y: number, team?: "player" | "enemy") {
-  return [...state.units]
-    .reverse()
-    .find(
-      (unit) =>
-        unit.hp > 0 &&
-        (!team || unit.team === team) &&
-        distance(x, y, unit.x, unit.y) < (unit.kind === "minotaur" ? 62 : 42),
-    );
+  return [...state.units].reverse().find((unit) => {
+    const radius = unit.kind === "troll" ? 82 : unit.kind === "minotaur" ? 66 : 48;
+    return unit.hp > 0 && (!team || unit.team === team) && distance(x, y, unit.x, unit.y - 12) < radius;
+  });
 }
 
 function hitBuilding(
@@ -595,22 +866,19 @@ function hitBuilding(
     if (building.hp <= 0 || (team && building.team !== team)) return false;
     const size = getBuildingSize(building.kind);
     return (
-      x >= building.x - size.w * 0.43 &&
-      x <= building.x + size.w * 0.43 &&
-      y >= building.y - size.h * 0.78 &&
-      y <= building.y + size.h * 0.1
+      x >= building.x - size.w * 0.55 &&
+      x <= building.x + size.w * 0.55 &&
+      y >= building.y - size.h * 0.88 &&
+      y <= building.y + 22
     );
   });
 }
 
 function hitResource(state: GameState, x: number, y: number) {
-  return [...state.nodes]
-    .reverse()
-    .find(
-      (node) =>
-        node.amount > 0 &&
-        distance(x, y, node.x, node.y) < (node.kind === "wood" ? 58 : 45),
-    );
+  return [...state.nodes].reverse().find((node) => {
+    const radius = node.kind === "wood" ? 70 : node.kind === "meat" ? 54 : 58;
+    return node.amount > 0 && distance(x, y, node.x, node.y - 8) < radius;
+  });
 }
 
 export function getHoverTarget(state: GameState, x: number, y: number): HoverTarget | null {
@@ -622,6 +890,7 @@ export function getHoverTarget(state: GameState, x: number, y: number): HoverTar
       kind: unit.kind,
       hp: Math.ceil(unit.hp),
       maxHp: unit.maxHp,
+      boss: unit.boss,
     };
   }
   const building = hitBuilding(state, x, y);
@@ -632,15 +901,19 @@ export function getHoverTarget(state: GameState, x: number, y: number): HoverTar
       kind: building.kind,
       hp: Math.ceil(building.hp),
       maxHp: building.maxHp,
+      respawnClock: building.respawnClock,
     };
   }
-  const node = hitResource(state, x, y);
+  const node = [...state.nodes]
+    .reverse()
+    .find((candidate) => distance(x, y, candidate.x, candidate.y) < 66);
   if (node) {
     return {
       type: "resource",
       id: node.id,
       kind: node.kind,
       amount: Math.ceil(node.amount),
+      respawnClock: node.respawnClock,
     };
   }
   return null;
@@ -648,7 +921,6 @@ export function getHoverTarget(state: GameState, x: number, y: number): HoverTar
 
 export function selectPoint(state: GameState, x: number, y: number, additive = false) {
   if (state.buildMode) return placeBuilding(state, x, y);
-
   const unit = hitUnit(state, x, y, "player");
   if (unit) {
     state.selectedBuildingId = undefined;
@@ -658,7 +930,6 @@ export function selectPoint(state: GameState, x: number, y: number, additive = f
     if (state.tutorialStep === 0 && unit.kind === "pawn") state.tutorialStep = 1;
     return true;
   }
-
   const building = hitBuilding(state, x, y, "player");
   if (building) {
     state.selectedUnitIds = [];
@@ -666,7 +937,6 @@ export function selectPoint(state: GameState, x: number, y: number, additive = f
     if (state.tutorialStep === 3 && building.kind === "barracks") state.tutorialStep = 4;
     return true;
   }
-
   if (!additive) {
     state.selectedUnitIds = [];
     state.selectedBuildingId = undefined;
@@ -713,6 +983,14 @@ function clearTargets(unit: Unit) {
   unit.targetUnitId = undefined;
   unit.targetBuildingId = undefined;
   unit.targetResourceId = undefined;
+  unit.path = [];
+}
+
+function setDestination(unit: Unit, x: number, y: number) {
+  unit.targetX = x;
+  unit.targetY = y;
+  unit.path = findPath(unit.x, unit.y, x, y);
+  unit.pathClock = 0.7;
 }
 
 export function issueCommand(state: GameState, x: number, y: number) {
@@ -720,12 +998,10 @@ export function issueCommand(state: GameState, x: number, y: number) {
     cancelBuild(state);
     return;
   }
-
   const selected = state.units.filter(
     (unit) => state.selectedUnitIds.includes(unit.id) && unit.hp > 0,
   );
   if (!selected.length) return;
-
   const enemy = hitUnit(state, x, y, "enemy");
   const enemyBuilding = hitBuilding(state, x, y, "enemy");
   const resource = hitResource(state, x, y);
@@ -751,13 +1027,14 @@ export function issueCommand(state: GameState, x: number, y: number) {
       unit.targetResourceId = resource.id;
       unit.homeResourceId = resource.id;
       unit.workingResource = resource.kind;
+      setDestination(unit, resource.x, resource.y + 26);
     }
     state.marker = { x, y, age: 0, kind: "gather" };
     if (state.tutorialStep === 1 && resource.kind === "wood") state.tutorialStep = 2;
     return;
   }
 
-  if (!isWalkable(x, y)) {
+  if (!isWalkable(x, y, 8)) {
     state.marker = { x, y, age: 0, kind: "invalid" };
     return;
   }
@@ -767,25 +1044,37 @@ export function issueCommand(state: GameState, x: number, y: number) {
     clearTargets(unit);
     const col = index % columns;
     const row = Math.floor(index / columns);
-    const ox = (col - (columns - 1) / 2) * 42;
-    const oy = row * 34;
-    unit.targetX = x + ox;
-    unit.targetY = y + oy;
+    const ox = (col - (columns - 1) / 2) * 46;
+    const oy = row * 38;
+    setDestination(unit, x + ox, y + oy);
     unit.action = "move";
   });
   state.marker = { x, y, age: 0, kind: "move" };
+  if (state.tutorialStep === 6) state.tutorialStep = 7;
 }
 
-function moveToward(unit: Unit, x: number, y: number, dt: number) {
+function moveDirect(unit: Unit, x: number, y: number, dt: number) {
   const dx = x - unit.x;
   const dy = y - unit.y;
   const length = Math.hypot(dx, dy);
-  if (length < 2) return true;
+  if (length < 3) return true;
   const step = Math.min(length, UNIT_SPEC[unit.kind].speed * dt);
   unit.x += (dx / length) * step;
   unit.y += (dy / length) * step;
   if (Math.abs(dx) > 1) unit.facing = dx < 0 ? -1 : 1;
-  return length <= UNIT_SPEC[unit.kind].speed * dt + 2;
+  return length <= UNIT_SPEC[unit.kind].speed * dt + 3;
+}
+
+function moveAlongPath(unit: Unit, dt: number) {
+  if (!unit.path.length) {
+    unit.path = findPath(unit.x, unit.y, unit.targetX, unit.targetY);
+    if (!unit.path.length) return true;
+  }
+  const next = unit.path[0];
+  if (moveDirect(unit, next.x, next.y, dt)) {
+    unit.path.shift();
+  }
+  return unit.path.length === 0;
 }
 
 function addEffect(
@@ -799,37 +1088,73 @@ function addEffect(
 }
 
 function damageBuilding(state: GameState, building: Building, amount: number) {
+  if (building.hp <= 0) return;
   building.hp = Math.max(0, building.hp - amount);
   if (building.hp <= 0) {
     addEffect(state, "explosion", building.x, building.y - 44, 0.9);
     if (building.kind === "house") {
       state.populationCap = Math.max(4, state.populationCap - 4);
     }
+    if (building.team === "enemy" && !building.cleared) {
+      building.cleared = true;
+      state.nestsCleared += 1;
+      state.resources.wood += 45;
+      state.resources.gold += 35;
+      if (state.mode === "endless") building.respawnClock = 55;
+    }
   }
 }
 
 function damageUnit(state: GameState, unit: Unit, amount: number) {
-  unit.hp = Math.max(0, unit.hp - amount);
+  const guarded = unit.action === "guard" && (unit.kind === "lancer" || unit.kind === "skull");
+  unit.hp = Math.max(0, unit.hp - amount * (guarded ? 0.5 : 1));
   if (unit.hp <= 0) addEffect(state, "explosion", unit.x, unit.y - 20, 0.65);
+}
+
+function waveRoster(state: GameState): EnemyKind[] {
+  const wave = state.wave;
+  if (state.mode === "endless") {
+    const roster: EnemyKind[] = [];
+    const count = Math.min(18, 4 + wave * 2);
+    const pool: EnemyKind[] =
+      wave < 3
+        ? ["gnome", "goblin", "thief"]
+        : wave < 6
+          ? ["goblin", "gnoll", "thief", "skull", "panda"]
+          : ["gnoll", "skull", "panda", "minotaur", "thief"];
+    for (let index = 0; index < count; index += 1) {
+      roster.push(pool[(index * 3 + wave) % pool.length]);
+    }
+    if (wave % 5 === 0) roster.unshift("troll");
+    else if (wave % 3 === 0) roster.unshift("minotaur");
+    return roster;
+  }
+  const ratio = wave / state.totalWaves;
+  if (wave === state.totalWaves) {
+    return ["troll", "minotaur", "panda", "gnoll", "skull", "thief", "goblin"];
+  }
+  if (ratio > 0.62) return ["minotaur", "panda", "gnoll", "skull", "thief", "goblin", "goblin"];
+  if (ratio > 0.34) return ["gnoll", "thief", "thief", "skull", "goblin", "goblin"];
+  return ["gnome", "gnome", "goblin", "goblin", "thief"];
 }
 
 function spawnWave(state: GameState) {
   state.wave += 1;
   state.waveActive = true;
-  const waves: EnemyKind[][] = [
-    ["gnome", "gnome", "goblin", "goblin", "goblin"],
-    ["gnoll", "thief", "thief", "skull", "goblin", "goblin"],
-    ["minotaur", "panda", "gnoll", "skull", "thief", "goblin", "gnome"],
-  ];
-  const kinds = waves[Math.min(state.wave - 1, waves.length - 1)];
-  kinds.forEach((kind, index) => {
-    const unit = createUnit(
-      nextId(state),
-      kind,
-      "enemy",
-      ENEMY_SPAWN.x + (index % 3) * 24 - 26,
-      ENEMY_SPAWN.y + Math.floor(index / 3) * 28,
-    );
+  const roster = waveRoster(state);
+  const activeDens = state.buildings.filter(
+    (building) => building.team === "enemy" && building.hp > 0,
+  );
+  roster.forEach((kind, index) => {
+    const den = activeDens[index % Math.max(1, activeDens.length)];
+    const fallback = ENEMY_SPAWNS[index % ENEMY_SPAWNS.length];
+    const x = (den?.x ?? fallback.x) + (index % 3) * 34 - 34;
+    const y = (den?.y ?? fallback.y) + 58 + Math.floor(index / 3) * 30;
+    const unit = createUnit(nextId(state), kind, "enemy", x, y, state.level + Math.floor(state.wave / 4));
+    if (kind === "troll") {
+      unit.boss = true;
+      state.bossSpawned = true;
+    }
     unit.anim += index * 0.14;
     state.units.push(unit);
     addEffect(state, "dust", unit.x, unit.y, 0.55);
@@ -850,31 +1175,65 @@ function nearestEnemy(state: GameState, unit: Unit, range: number) {
   return found;
 }
 
+function nearestResource(state: GameState, unit: Unit) {
+  return state.nodes
+    .filter((node) => node.amount > 0)
+    .sort(
+      (a, b) =>
+        distance(unit.x, unit.y, a.x, a.y) -
+        distance(unit.x, unit.y, b.x, b.y),
+    )[0];
+}
+
+function beginGather(unit: Unit, node: ResourceNode) {
+  clearTargets(unit);
+  unit.action = "gather";
+  unit.targetResourceId = node.id;
+  unit.homeResourceId = node.id;
+  unit.workingResource = node.kind;
+  setDestination(unit, node.x, node.y + 28);
+}
+
 function updatePawn(state: GameState, unit: Unit, dt: number) {
+  if (unit.action === "idle" && state.autoFarm) {
+    const node = nearestResource(state, unit);
+    if (node) beginGather(unit, node);
+  }
   if (unit.action === "gather") {
-    const node = state.nodes.find(
+    let node = state.nodes.find(
       (candidate) => candidate.id === unit.targetResourceId && candidate.amount > 0,
     );
+    if (!node && state.autoFarm) {
+      node = nearestResource(state, unit);
+      if (node) beginGather(unit, node);
+    }
     if (!node) {
       unit.action = "idle";
       unit.targetResourceId = undefined;
       unit.workingResource = undefined;
       return;
     }
-    if (!moveToward(unit, node.x - 25, node.y + 10, dt)) return;
+    unit.targetX = node.x;
+    unit.targetY = node.y + 28;
+    if (distance(unit.x, unit.y, unit.targetX, unit.targetY) > 44) {
+      if (!unit.path.length) setDestination(unit, unit.targetX, unit.targetY);
+      moveAlongPath(unit, dt);
+      return;
+    }
     unit.gatherClock += dt;
     if (unit.gatherClock >= 1.15) {
       unit.gatherClock = 0;
-      const amount = Math.min(10, node.amount);
+      const amount = Math.min(12, node.amount);
       node.amount -= amount;
+      if (node.amount <= 0) node.respawnClock = node.respawnDelay;
       unit.carrying = node.kind;
       unit.carryAmount = amount;
       unit.action = "return";
       unit.targetResourceId = undefined;
+      unit.path = [];
     }
     return;
   }
-
   if (unit.action === "return") {
     const castle = state.buildings.find(
       (building) => building.kind === "castle" && building.hp > 0,
@@ -883,7 +1242,13 @@ function updatePawn(state: GameState, unit: Unit, dt: number) {
       unit.action = "idle";
       return;
     }
-    if (!moveToward(unit, castle.x + 70, castle.y - 12, dt)) return;
+    unit.targetX = castle.x + 85;
+    unit.targetY = castle.y - 4;
+    if (distance(unit.x, unit.y, unit.targetX, unit.targetY) > 50) {
+      if (!unit.path.length) setDestination(unit, unit.targetX, unit.targetY);
+      moveAlongPath(unit, dt);
+      return;
+    }
     if (unit.carrying) {
       state.resources[unit.carrying] += unit.carryAmount;
       if (state.tutorialStep === 2 && unit.carrying === "wood") state.tutorialStep = 3;
@@ -893,9 +1258,11 @@ function updatePawn(state: GameState, unit: Unit, dt: number) {
     const home = state.nodes.find(
       (node) => node.id === unit.homeResourceId && node.amount > 0,
     );
-    if (home) {
-      unit.targetResourceId = home.id;
-      unit.action = "gather";
+    if (home) beginGather(unit, home);
+    else if (state.autoFarm) {
+      const next = nearestResource(state, unit);
+      if (next) beginGather(unit, next);
+      else unit.action = "idle";
     } else {
       unit.action = "idle";
       unit.workingResource = undefined;
@@ -903,19 +1270,30 @@ function updatePawn(state: GameState, unit: Unit, dt: number) {
   }
 }
 
+function refreshChasePath(unit: Unit, x: number, y: number, dt: number) {
+  unit.pathClock -= dt;
+  if (unit.pathClock <= 0 || !unit.path.length) {
+    setDestination(unit, x, y);
+    unit.pathClock = 0.8;
+  }
+  moveAlongPath(unit, dt);
+}
+
 function updatePlayerCombat(state: GameState, unit: Unit, dt: number) {
   if (unit.kind === "monk") {
     unit.healClock -= dt;
-    const ally = state.units.find(
-      (candidate) =>
-        candidate.team === "player" &&
-        candidate.hp > 0 &&
-        candidate.hp < candidate.maxHp &&
-        distance(unit.x, unit.y, candidate.x, candidate.y) < 155,
-    );
+    const ally = state.units
+      .filter(
+        (candidate) =>
+          candidate.team === "player" &&
+          candidate.hp > 0 &&
+          candidate.hp < candidate.maxHp &&
+          distance(unit.x, unit.y, candidate.x, candidate.y) < 175,
+      )
+      .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
     if (ally && unit.healClock <= 0) {
-      ally.hp = Math.min(ally.maxHp, ally.hp + 22);
-      unit.healClock = 1.3;
+      ally.hp = Math.min(ally.maxHp, ally.hp + 25);
+      unit.healClock = 1.35;
       unit.action = "heal";
       addEffect(state, "heal", ally.x, ally.y - 22, 0.65);
       return;
@@ -928,86 +1306,102 @@ function updatePlayerCombat(state: GameState, unit: Unit, dt: number) {
       candidate.team === "enemy" &&
       candidate.hp > 0,
   );
-  let building = state.buildings.find(
+  const building = state.buildings.find(
     (candidate) =>
       candidate.id === unit.targetBuildingId &&
       candidate.team === "enemy" &&
       candidate.hp > 0,
   );
-
   if (!target && !building && unit.action === "attack") {
-    target = nearestEnemy(state, unit, 210);
+    target = nearestEnemy(state, unit, 235);
     unit.targetUnitId = target?.id;
   }
-
   if (!target && !building) {
     if (unit.action === "attack" || unit.action === "heal") {
       unit.action = unit.kind === "lancer" ? "guard" : "idle";
       unit.targetUnitId = undefined;
       unit.targetBuildingId = undefined;
+      unit.path = [];
     }
     return;
   }
-
   const tx = target?.x ?? building!.x;
   const ty = target?.y ?? building!.y - 38;
   const spec = UNIT_SPEC[unit.kind];
   const d = distance(unit.x, unit.y, tx, ty);
   if (d > spec.range) {
     unit.action = "attack";
-    moveToward(unit, tx, ty, dt);
+    refreshChasePath(unit, tx, ty, dt);
     return;
   }
-
+  unit.path = [];
   unit.action = "attack";
   unit.facing = tx < unit.x ? -1 : 1;
   if (unit.attackClock > 0) return;
   unit.attackClock = spec.cooldown;
-
-  if (unit.kind === "archer") {
-    if (target) {
-      state.projectiles.push({
-        id: nextId(state),
-        x: unit.x,
-        y: unit.y - 42,
-        targetId: target.id,
-        team: "player",
-        damage: spec.damage,
-        speed: 390,
-        age: 0,
-      });
-    } else if (building) {
-      damageBuilding(state, building, spec.damage);
-    }
-  } else if (target) {
-    damageUnit(state, target, spec.damage);
-  } else if (building) {
-    damageBuilding(state, building, spec.damage);
-  }
+  if (unit.kind === "archer" && target) {
+    state.projectiles.push({
+      id: nextId(state),
+      x: unit.x,
+      y: unit.y - 42,
+      targetId: target.id,
+      team: "player",
+      damage: spec.damage,
+      speed: 410,
+      age: 0,
+    });
+  } else if (target) damageUnit(state, target, spec.damage);
+  else if (building) damageBuilding(state, building, spec.damage);
 }
 
 function chooseEnemyTarget(state: GameState, unit: Unit) {
-  const nearby = state.units
-    .filter(
-      (candidate) =>
-        candidate.team === "player" &&
-        candidate.hp > 0 &&
-        distance(unit.x, unit.y, candidate.x, candidate.y) < 185,
-    )
-    .sort(
-      (a, b) =>
-        distance(unit.x, unit.y, a.x, a.y) - distance(unit.x, unit.y, b.x, b.y),
-    )[0];
+  const candidates = state.units.filter(
+    (candidate) =>
+      candidate.team === "player" &&
+      candidate.hp > 0 &&
+      distance(unit.x, unit.y, candidate.x, candidate.y) < 250,
+  );
+  const nearby =
+    unit.kind === "thief"
+      ? candidates.sort((a, b) => {
+          const priority = (kind: UnitKind) =>
+            kind === "monk" ? 0 : kind === "archer" ? 1 : kind === "pawn" ? 2 : 3;
+          return priority(a.kind) - priority(b.kind);
+        })[0]
+      : candidates.sort(
+          (a, b) =>
+            distance(unit.x, unit.y, a.x, a.y) -
+            distance(unit.x, unit.y, b.x, b.y),
+        )[0];
   if (nearby) {
     unit.targetUnitId = nearby.id;
     unit.targetBuildingId = undefined;
     return;
   }
-  const castle = state.buildings.find(
-    (building) => building.kind === "castle" && building.hp > 0,
-  );
-  unit.targetBuildingId = castle?.id;
+  const targetBuilding = state.buildings
+    .filter((building) => building.team === "player" && building.hp > 0)
+    .sort((a, b) => {
+      const ap = a.kind === "castle" ? 0 : a.kind === "tower" ? 1 : 2;
+      const bp = b.kind === "castle" ? 0 : b.kind === "tower" ? 1 : 2;
+      return ap - bp;
+    })[0];
+  unit.targetBuildingId = targetBuilding?.id;
   unit.targetUnitId = undefined;
+}
+
+function trollImpact(state: GameState, unit: Unit, target?: Unit, building?: Building) {
+  const victims = state.units.filter(
+    (candidate) =>
+      candidate.team === "player" &&
+      candidate.hp > 0 &&
+      distance(unit.x, unit.y, candidate.x, candidate.y) < 112,
+  );
+  victims.forEach((victim) => damageUnit(state, victim, UNIT_SPEC.troll.damage));
+  if (building && distance(unit.x, unit.y, building.x, building.y) < 125) {
+    damageBuilding(state, building, UNIT_SPEC.troll.damage);
+  }
+  if (target && !victims.includes(target)) damageUnit(state, target, UNIT_SPEC.troll.damage);
+  addEffect(state, "explosion", unit.x + unit.facing * 46, unit.y - 18, 0.75);
 }
 
 function updateEnemy(state: GameState, unit: Unit, dt: number) {
@@ -1026,27 +1420,49 @@ function updateEnemy(state: GameState, unit: Unit, dt: number) {
   if (!target && !building) {
     chooseEnemyTarget(state, unit);
     target = state.units.find((candidate) => candidate.id === unit.targetUnitId);
-    building = state.buildings.find(
-      (candidate) => candidate.id === unit.targetBuildingId,
-    );
+    building = state.buildings.find((candidate) => candidate.id === unit.targetBuildingId);
   }
   if (!target && !building) return;
-
   const tx = target?.x ?? building!.x;
   const ty = target?.y ?? building!.y - 26;
   const spec = UNIT_SPEC[unit.kind];
   const d = distance(unit.x, unit.y, tx, ty);
-  if (d > spec.range) {
-    unit.action = "move";
-    moveToward(unit, tx, ty, dt);
+
+  if (unit.kind === "troll" && unit.action === "windup") {
+    unit.specialClock -= dt;
+    if (unit.specialClock <= 0) {
+      trollImpact(state, unit, target, building);
+      unit.action = "recovery";
+      unit.specialClock = 1.1;
+    }
     return;
   }
-
-  unit.action = "attack";
+  if (unit.kind === "troll" && unit.action === "recovery") {
+    unit.specialClock -= dt;
+    if (unit.specialClock <= 0) {
+      unit.action = "idle";
+      unit.attackClock = spec.cooldown;
+    }
+    return;
+  }
+  if (d > spec.range) {
+    unit.action = "move";
+    refreshChasePath(unit, tx, ty, dt);
+    return;
+  }
+  unit.path = [];
   unit.facing = tx < unit.x ? -1 : 1;
-  if (unit.attackClock > 0) return;
+  if (unit.attackClock > 0) {
+    unit.action = unit.kind === "skull" && unit.attackClock < 0.35 ? "guard" : "attack";
+    return;
+  }
+  if (unit.kind === "troll") {
+    unit.action = "windup";
+    unit.specialClock = 0.9;
+    return;
+  }
+  unit.action = "attack";
   unit.attackClock = spec.cooldown;
-
   if (unit.kind === "gnoll" && target) {
     state.projectiles.push({
       id: nextId(state),
@@ -1055,14 +1471,11 @@ function updateEnemy(state: GameState, unit: Unit, dt: number) {
       targetId: target.id,
       team: "enemy",
       damage: spec.damage,
-      speed: 310,
+      speed: 325,
       age: 0,
     });
-  } else if (target) {
-    damageUnit(state, target, spec.damage);
-  } else if (building) {
-    damageBuilding(state, building, spec.damage);
-  }
+  } else if (target) damageUnit(state, target, spec.damage);
+  else if (building) damageBuilding(state, building, spec.damage);
 }
 
 function updateProjectiles(state: GameState, dt: number) {
@@ -1081,7 +1494,7 @@ function updateProjectiles(state: GameState, dt: number) {
     const dx = target.x - projectile.x;
     const dy = target.y - 34 - projectile.y;
     const length = Math.hypot(dx, dy);
-    if (length < 12) {
+    if (length < 13) {
       damageUnit(state, target, projectile.damage);
       projectile.age = 99;
       addEffect(state, "dust", target.x, target.y - 22, 0.35);
@@ -1091,49 +1504,62 @@ function updateProjectiles(state: GameState, dt: number) {
     projectile.x += (dx / length) * step;
     projectile.y += (dy / length) * step;
   }
-  state.projectiles = state.projectiles.filter(
-    (projectile) => projectile.age < 5,
-  );
+  state.projectiles = state.projectiles.filter((projectile) => projectile.age < 5);
+}
+
+function updateResources(state: GameState, dt: number) {
+  for (const node of state.nodes) {
+    if (node.amount > 0 || node.respawnClock <= 0) continue;
+    node.respawnClock -= dt;
+    if (node.respawnClock <= 0) {
+      node.amount = node.maxAmount;
+      node.variant = (node.variant + 1) % (node.kind === "wood" ? 4 : 3);
+      addEffect(state, node.kind === "meat" ? "splash" : "dust", node.x, node.y, 0.65);
+    }
+  }
 }
 
 function updateBuildings(state: GameState, dt: number) {
   for (const building of state.buildings) {
-    if (building.hp <= 0) continue;
-    building.attackClock = Math.max(0, building.attackClock - dt);
-
-    if (building.construction < 1) {
-      building.construction = Math.min(1, building.construction + dt / 5);
-      building.hp = Math.min(
-        building.maxHp,
-        building.hp + (building.maxHp * dt) / 6.7,
-      );
+    if (building.hp <= 0) {
+      if (state.mode === "endless" && building.team === "enemy" && building.respawnClock > 0) {
+        building.respawnClock -= dt;
+        if (building.respawnClock <= 0) {
+          building.hp = building.maxHp;
+          building.cleared = false;
+          addEffect(state, "fire", building.x, building.y - 45, 0.9);
+        }
+      }
       continue;
     }
-
+    building.attackClock = Math.max(0, building.attackClock - dt);
+    if (building.construction < 1) {
+      building.construction = Math.min(1, building.construction + dt / 5);
+      building.hp = Math.min(building.maxHp, building.hp + (building.maxHp * dt) / 6.7);
+      continue;
+    }
     if (building.queue) {
       building.queue.remaining -= dt;
       if (building.queue.remaining <= 0) {
-        const kind = building.queue.kind;
         const unit = createUnit(
           nextId(state),
-          kind,
+          building.queue.kind,
           "player",
-          building.x + 72,
-          building.y + 28,
+          building.x + 84,
+          building.y + 32,
         );
         state.units.push(unit);
         addEffect(state, "dust", unit.x, unit.y, 0.55);
         building.queue = undefined;
       }
     }
-
     if (building.kind === "tower" && building.attackClock <= 0) {
       const enemy = state.units
         .filter(
           (unit) =>
             unit.team === "enemy" &&
             unit.hp > 0 &&
-            distance(building.x, building.y, unit.x, unit.y) < 285,
+            distance(building.x, building.y, unit.x, unit.y) < 315,
         )
         .sort(
           (a, b) =>
@@ -1144,14 +1570,14 @@ function updateBuildings(state: GameState, dt: number) {
         state.projectiles.push({
           id: nextId(state),
           x: building.x,
-          y: building.y - 135,
+          y: building.y - 145,
           targetId: enemy.id,
           team: "player",
-          damage: 34,
-          speed: 430,
+          damage: 36,
+          speed: 440,
           age: 0,
         });
-        building.attackClock = 1.15;
+        building.attackClock = 1.1;
       }
     }
   }
@@ -1166,9 +1592,12 @@ export function updateGame(state: GameState, dt: number) {
     state.marker.age += dt;
     if (state.marker.age > 0.75) state.marker = undefined;
   }
-
   state.waveClock -= dt;
-  if (!state.waveActive && state.wave < state.totalWaves && state.waveClock <= 0) {
+  if (
+    !state.waveActive &&
+    (state.mode === "endless" || state.wave < state.totalWaves) &&
+    state.waveClock <= 0
+  ) {
     spawnWave(state);
   }
 
@@ -1176,35 +1605,26 @@ export function updateGame(state: GameState, dt: number) {
     if (unit.hp <= 0) continue;
     unit.anim += dt;
     unit.attackClock = Math.max(0, unit.attackClock - dt);
-
     if (unit.team === "enemy") {
       updateEnemy(state, unit, dt);
       continue;
     }
-
-    if (unit.kind === "pawn" && (unit.action === "gather" || unit.action === "return")) {
+    if (
+      unit.kind === "pawn" &&
+      (unit.action === "gather" || unit.action === "return" || (unit.action === "idle" && state.autoFarm))
+    ) {
       updatePawn(state, unit, dt);
       continue;
     }
-
     if (unit.action === "move") {
-      if (moveToward(unit, unit.targetX, unit.targetY, dt)) {
-        unit.action = unit.kind === "lancer" ? "guard" : "idle";
-      }
+      if (moveAlongPath(unit, dt)) unit.action = unit.kind === "lancer" ? "guard" : "idle";
       continue;
     }
-
-    if (
-      unit.action === "attack" ||
-      unit.action === "heal" ||
-      unit.targetUnitId ||
-      unit.targetBuildingId
-    ) {
+    if (unit.action === "attack" || unit.action === "heal" || unit.targetUnitId || unit.targetBuildingId) {
       updatePlayerCombat(state, unit, dt);
       continue;
     }
-
-    const nearby = nearestEnemy(state, unit, unit.kind === "archer" ? 220 : 120);
+    const nearby = nearestEnemy(state, unit, unit.kind === "archer" ? 245 : 135);
     if (nearby && unit.kind !== "pawn") {
       unit.targetUnitId = nearby.id;
       unit.action = "attack";
@@ -1214,11 +1634,10 @@ export function updateGame(state: GameState, dt: number) {
   }
 
   updateBuildings(state, dt);
+  updateResources(state, dt);
   updateProjectiles(state, dt);
-
   for (const effect of state.effects) effect.age += dt;
   state.effects = state.effects.filter((effect) => effect.age < effect.duration);
-
   state.units = state.units.filter((unit) => unit.hp > 0);
   state.selectedUnitIds = state.selectedUnitIds.filter((id) =>
     state.units.some((unit) => unit.id === id && unit.hp > 0),
@@ -1227,15 +1646,22 @@ export function updateGame(state: GameState, dt: number) {
   const livingEnemies = state.units.filter((unit) => unit.team === "enemy").length;
   if (state.waveActive && livingEnemies === 0) {
     state.waveActive = false;
-    state.waveClock = state.wave >= state.totalWaves ? 9999 : 23;
+    state.waveClock =
+      state.mode === "endless"
+        ? Math.max(8, 18 - state.wave * 0.45)
+        : state.wave >= state.totalWaves
+          ? 9999
+          : 20;
   }
-
-  const castle = state.buildings.find((building) => building.kind === "castle");
+  const castle = state.buildings.find(
+    (building) => building.kind === "castle" && building.team === "player",
+  );
   const cave = state.buildings.find((building) => building.kind === "cave");
-  if (!castle || castle.hp <= 0) {
-    state.outcome = "defeat";
-  } else if (
+  if (!castle || castle.hp <= 0) state.outcome = "defeat";
+  else if (
+    state.mode === "stage" &&
     state.wave >= state.totalWaves &&
+    state.bossSpawned &&
     !state.waveActive &&
     livingEnemies === 0 &&
     (!cave || cave.hp <= 0)
@@ -1275,54 +1701,61 @@ function drawSprite(
   ctx.restore();
 }
 
-function drawIslandRect(
-  ctx: CanvasRenderingContext2D,
-  images: ImageBank,
-  x: number,
-  y: number,
-  columns: number,
-  rows: number,
-  time: number,
-  tilemap: AssetKey = "grassSpring",
-) {
-  const terrain = images[tilemap];
-  const foam = images.foam;
+function tileAsset(kind: TerrainKind): AssetKey {
+  if (kind === "autumn") return "grassAutumn";
+  if (kind === "deep") return "grassDeep";
+  return "grassSpring";
+}
 
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < columns; col += 1) {
-      if (row !== 0 && row !== rows - 1 && col !== 0 && col !== columns - 1) continue;
-      const frame = Math.floor(time * 9 + col * 2 + row * 3) % 16;
-      ctx.drawImage(
-        foam,
-        frame * 192,
-        0,
-        192,
-        192,
-        x + col * TILE - 64,
-        y + row * TILE - 64,
-        192,
-        192,
-      );
+function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: GameState, camera: Camera) {
+  const firstC = Math.max(0, Math.floor(camera.x / TILE) - 2);
+  const lastC = Math.min(COLS - 1, Math.ceil((camera.x + VIEW_W) / TILE) + 2);
+  const firstR = Math.max(0, Math.floor(camera.y / TILE) - 2);
+  const lastR = Math.min(ROWS - 1, Math.ceil((camera.y + VIEW_H) / TILE) + 2);
+  for (let r = firstR; r <= lastR; r += 1) {
+    for (let c = firstC; c <= lastC; c += 1) {
+      ctx.drawImage(images.water, c * TILE, r * TILE, TILE, TILE);
+    }
+  }
+  for (let r = firstR; r <= lastR; r += 1) {
+    for (let c = firstC; c <= lastC; c += 1) {
+      const kind = terrainAtCell(c, r);
+      if (kind === "water" || kind === "bridge" || kind === "hill") continue;
+      const leftWater = terrainAtCell(c - 1, r) === "water";
+      const rightWater = terrainAtCell(c + 1, r) === "water";
+      const topWater = terrainAtCell(c, r - 1) === "water";
+      const bottomWater = terrainAtCell(c, r + 1) === "water";
+      const sx = leftWater ? 0 : rightWater ? 128 : 64;
+      const sy = topWater ? 0 : bottomWater ? 128 : 64;
+      if (leftWater || rightWater || topWater || bottomWater) {
+        const frame = Math.floor(state.time * 8 + c * 2 + r * 3) % 16;
+        ctx.drawImage(
+          images.foam,
+          frame * 192,
+          0,
+          192,
+          192,
+          c * TILE - 64,
+          r * TILE - 64,
+          192,
+          192,
+        );
+      }
+      ctx.drawImage(images[tileAsset(kind)], sx, sy, 64, 64, c * TILE, r * TILE, 64, 64);
+      if (kind === "road") {
+        ctx.fillStyle = "rgba(190, 154, 92, .23)";
+        ctx.fillRect(c * TILE + 3, r * TILE + 10, 58, 44);
+      }
     }
   }
 
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < columns; col += 1) {
-      const sx = col === 0 ? 0 : col === columns - 1 ? 128 : 64;
-      const sy = row === 0 ? 0 : row === rows - 1 ? 128 : 64;
-      ctx.drawImage(
-        terrain,
-        sx,
-        sy,
-        64,
-        64,
-        x + col * TILE,
-        y + row * TILE,
-        64,
-        64,
-      );
-    }
-  }
+  drawElevation(ctx, images, 9 * TILE, 3 * TILE, 7, 4, state.time);
+  drawElevation(ctx, images, 29 * TILE, 18 * TILE, 7, 4, state.time);
+  drawElevation(ctx, images, 36 * TILE, 8 * TILE, 5, 3, state.time);
+  drawBridge(ctx, images, 22 * TILE, 8 * TILE, 1);
+  drawBridge(ctx, images, 22 * TILE, 23 * TILE, 1);
+  drawBridge(ctx, images, 7 * TILE, 14 * TILE, 2);
+  drawWorldPaths(ctx, images);
 }
 
 function drawElevation(
@@ -1334,23 +1767,51 @@ function drawElevation(
   rows: number,
   time: number,
 ) {
-  drawIslandRect(ctx, images, x, y, columns, rows, time, "grassDeep");
   const terrain = images.grassDeep;
-  for (let col = 0; col < columns; col += 1) {
-    const sx = col === 0 ? 320 : col === columns - 1 ? 448 : 384;
-    for (let face = 0; face < 3; face += 1) {
-      ctx.drawImage(
-        terrain,
-        sx,
-        192 + face * 64,
-        64,
-        64,
-        x + col * 64,
-        y + rows * 64 + face * 64,
-        64,
-        64,
-      );
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      const sx = c === 0 ? 0 : c === columns - 1 ? 128 : 64;
+      const sy = r === 0 ? 0 : r === rows - 1 ? 128 : 64;
+      ctx.drawImage(terrain, sx, sy, 64, 64, x + c * 64, y + r * 64, 64, 64);
     }
+  }
+  for (let c = 0; c < columns; c += 1) {
+    const sx = c === 0 ? 320 : c === columns - 1 ? 448 : 384;
+    for (let face = 0; face < 2; face += 1) {
+      ctx.drawImage(terrain, sx, 192 + face * 64, 64, 64, x + c * 64, y + rows * 64 + face * 64, 64, 64);
+    }
+  }
+  const shimmer = 0.03 + Math.sin(time * 0.7 + x) * 0.01;
+  ctx.fillStyle = `rgba(255,255,210,${shimmer})`;
+  ctx.fillRect(x, y, columns * 64, rows * 64);
+}
+
+function drawBridge(ctx: CanvasRenderingContext2D, images: ImageBank, x: number, y: number, repeats: number) {
+  for (let index = 0; index < repeats; index += 1) {
+    ctx.drawImage(images.bridgeAll, 0, 0, 192, 64, x + index * 192, y + 15, 192, 64);
+  }
+}
+
+function drawWorldPaths(ctx: CanvasRenderingContext2D, images: ImageBank) {
+  const fieldPatches = [
+    { x: 850, y: 1090, sx: 0 },
+    { x: 1730, y: 740, sx: 320 },
+    { x: 2070, y: 1440, sx: 0 },
+  ];
+  for (const patch of fieldPatches) {
+    ctx.save();
+    ctx.globalAlpha = 0.38;
+    ctx.drawImage(images.flatGround, patch.sx, 0, 192, 192, patch.x, patch.y, 192, 192);
+    ctx.globalAlpha = 0.25;
+    ctx.strokeStyle = "#6f764d";
+    ctx.lineWidth = 3;
+    for (let row = 1; row < 5; row += 1) {
+      ctx.beginPath();
+      ctx.moveTo(patch.x + 14, patch.y + row * 34);
+      ctx.lineTo(patch.x + 178, patch.y + row * 34);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 }
 
@@ -1361,47 +1822,67 @@ function drawHealthBar(
   value: number,
   max: number,
   team: "player" | "enemy",
-  width = 54,
+  width = 58,
 ) {
   const ratio = Math.max(0, Math.min(1, value / max));
-  ctx.fillStyle = "rgba(20, 29, 34, .78)";
-  ctx.fillRect(x - width / 2 - 2, y - 2, width + 4, 8);
+  ctx.fillStyle = "rgba(20, 29, 34, .82)";
+  ctx.fillRect(x - width / 2 - 2, y - 2, width + 4, 9);
   ctx.fillStyle = team === "player" ? "#7fd86d" : "#ed6a5b";
-  ctx.fillRect(x - width / 2, y, width * ratio, 4);
-  ctx.strokeStyle = "rgba(255, 244, 197, .75)";
+  ctx.fillRect(x - width / 2, y, width * ratio, 5);
+  ctx.strokeStyle = "rgba(255, 244, 197, .82)";
   ctx.lineWidth = 1;
-  ctx.strokeRect(x - width / 2, y, width, 4);
+  ctx.strokeRect(x - width / 2, y, width, 5);
+}
+
+function unitOverlapsOccluder(
+  state: GameState,
+  x: number,
+  y: number,
+  halfWidth: number,
+  height: number,
+) {
+  return state.units.some(
+    (unit) =>
+      unit.hp > 0 &&
+      unit.y < y + 12 &&
+      unit.y > y - height &&
+      Math.abs(unit.x - x) < halfWidth,
+  );
+}
+
+function buildingAsset(building: Building): AssetKey {
+  if (building.kind === "house") return `house${(building.variant % 3) + 1}` as AssetKey;
+  return BUILDING_SPEC[building.kind].asset;
 }
 
 function drawBuilding(
   ctx: CanvasRenderingContext2D,
   images: ImageBank,
+  state: GameState,
   building: Building,
   selected: boolean,
-  time: number,
 ) {
   const spec = BUILDING_SPEC[building.kind];
-  const image = images[spec.asset];
+  const image = images[buildingAsset(building)];
   const size = getBuildingSize(building.kind);
-  const alpha = building.construction < 1 ? 0.55 + building.construction * 0.45 : 1;
-  ctx.save();
-  ctx.globalAlpha = alpha;
+  const faded = unitOverlapsOccluder(state, building.x, building.y, size.w * 0.47, size.h * 0.77);
+  const constructionAlpha = building.construction < 1 ? 0.55 + building.construction * 0.45 : 1;
+  const alpha = constructionAlpha * (faded ? 0.34 : 1);
   if (selected) {
     ctx.fillStyle = "rgba(255, 232, 106, .28)";
     ctx.beginPath();
-    ctx.ellipse(building.x, building.y - 6, size.w * 0.48, 25, 0, 0, Math.PI * 2);
+    ctx.ellipse(building.x, building.y - 6, size.w * 0.5, 28, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = "#ffe36f";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.stroke();
   }
   if (spec.frame) {
-    const frame = Math.floor(time * 8) % Math.max(1, Math.floor(image.width / spec.frame));
     drawSprite(
       ctx,
       image,
       spec.frame,
-      frame,
+      Math.floor(state.time * 8),
       building.x,
       building.y + 18,
       spec.scale,
@@ -1409,34 +1890,28 @@ function drawBuilding(
       alpha,
     );
   } else {
-    ctx.drawImage(
-      image,
-      building.x - size.w / 2,
-      building.y - size.h,
-      size.w,
-      size.h,
-    );
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(image, building.x - size.w / 2, building.y - size.h, size.w, size.h);
+    ctx.restore();
   }
-  ctx.restore();
-
   if (building.hp < building.maxHp || selected) {
     drawHealthBar(
       ctx,
       building.x,
-      building.y - size.h - 10,
+      building.y - size.h - 11,
       building.hp,
       building.maxHp,
       building.team,
-      Math.min(100, size.w * 0.7),
+      Math.min(112, size.w * 0.75),
     );
   }
-
   if (building.queue) {
     const progress = 1 - building.queue.remaining / building.queue.total;
-    ctx.fillStyle = "rgba(20, 29, 34, .85)";
-    ctx.fillRect(building.x - 37, building.y + 7, 74, 9);
+    ctx.fillStyle = "rgba(20, 29, 34, .88)";
+    ctx.fillRect(building.x - 42, building.y + 8, 84, 10);
     ctx.fillStyle = "#efcb62";
-    ctx.fillRect(building.x - 35, building.y + 9, 70 * progress, 5);
+    ctx.fillRect(building.x - 40, building.y + 10, 80 * progress, 6);
   }
 }
 
@@ -1445,6 +1920,8 @@ function unitAsset(unit: Unit): AssetKey {
     unit.team === "player"
       ? PLAYER_SPRITES[unit.kind as PlayerUnitKind]
       : ENEMY_SPRITES[unit.kind as EnemyKind];
+  if (unit.kind === "troll" && unit.action === "windup") return "trollWindup";
+  if (unit.kind === "troll" && unit.action === "recovery") return "trollRecovery";
   if (unit.kind === "pawn" && unit.action === "return") {
     if (unit.carrying === "gold") return "pawnGold";
     if (unit.carrying === "meat") return "pawnMeat";
@@ -1467,27 +1944,15 @@ function unitAsset(unit: Unit): AssetKey {
   return sprites.idle;
 }
 
-function drawUnit(
-  ctx: CanvasRenderingContext2D,
-  images: ImageBank,
-  unit: Unit,
-  selected: boolean,
-) {
+function drawUnit(ctx: CanvasRenderingContext2D, images: ImageBank, unit: Unit, selected: boolean) {
   const spec = UNIT_SPEC[unit.kind];
   if (selected) {
+    const large = unit.kind === "troll" || unit.kind === "minotaur";
     ctx.fillStyle = "rgba(255, 232, 106, .24)";
     ctx.strokeStyle = "#ffe36f";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.ellipse(
-      unit.x,
-      unit.y - 4,
-      unit.kind === "minotaur" ? 48 : 32,
-      unit.kind === "minotaur" ? 22 : 15,
-      0,
-      0,
-      Math.PI * 2,
-    );
+    ctx.ellipse(unit.x, unit.y - 4, large ? 52 : 35, large ? 24 : 17, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
   }
@@ -1498,17 +1963,8 @@ function drawUnit(
       : unit.action === "move" || unit.action === "return"
         ? 9
         : 7;
-  drawSprite(
-    ctx,
-    image,
-    spec.frame,
-    Math.floor(unit.anim * fps),
-    unit.x,
-    unit.y,
-    spec.scale,
-    unit.facing,
-  );
-  if (unit.hp < unit.maxHp || selected) {
+  drawSprite(ctx, image, spec.frame, Math.floor(unit.anim * fps), unit.x, unit.y, spec.scale, unit.facing);
+  if (unit.hp < unit.maxHp || selected || unit.boss) {
     drawHealthBar(
       ctx,
       unit.x,
@@ -1516,31 +1972,41 @@ function drawUnit(
       unit.hp,
       unit.maxHp,
       unit.team,
-      unit.kind === "minotaur" ? 78 : 48,
+      unit.kind === "troll" ? 118 : unit.kind === "minotaur" ? 84 : 52,
     );
+  }
+  if (unit.boss) {
+    ctx.fillStyle = "#fff0a2";
+    ctx.font = "900 13px Georgia";
+    ctx.textAlign = "center";
+    ctx.fillText("BOSS", unit.x, unit.y - spec.frame * spec.scale * 0.72 - 9);
   }
 }
 
 function drawResource(
   ctx: CanvasRenderingContext2D,
   images: ImageBank,
+  state: GameState,
   node: ResourceNode,
-  time: number,
 ) {
   if (node.kind === "wood") {
-    const treeKey = `tree${(node.variant % 4) + 1}` as AssetKey;
-    const image = node.amount > 0 ? images[treeKey] : images.stump1;
-    const scale = node.amount > 0 ? 0.67 : 0.9;
+    const key = `tree${(node.variant % 4) + 1}` as AssetKey;
+    const image = node.amount > 0 ? images[key] : images.stump1;
+    const scale = node.amount > 0 ? 0.72 : 0.92;
     const width = image.width * scale;
     const height = image.height * scale;
+    const faded = node.amount > 0 && unitOverlapsOccluder(state, node.x, node.y, 48, height * 0.74);
+    ctx.save();
+    ctx.globalAlpha = faded ? 0.3 : 1;
     ctx.drawImage(image, node.x - width / 2, node.y - height * 0.82, width, height);
+    ctx.restore();
     return;
   }
   if (node.kind === "gold") {
     if (node.amount <= 0) return;
     const key = `gold${(node.variant % 3) + 1}` as AssetKey;
     const image = images[key];
-    const scale = 0.76;
+    const scale = 0.82;
     ctx.drawImage(
       image,
       node.x - (image.width * scale) / 2,
@@ -1551,28 +2017,23 @@ function drawResource(
     return;
   }
   if (node.amount <= 0) return;
-  const image = images.sheepIdle;
   drawSprite(
     ctx,
-    image,
+    images.sheepIdle,
     128,
-    Math.floor(time * 7 + node.variant * 2),
+    Math.floor(state.time * 7 + node.variant * 2),
     node.x,
     node.y,
-    0.72,
+    0.78,
     node.variant % 2 ? -1 : 1,
   );
 }
 
-function drawEffect(
-  ctx: CanvasRenderingContext2D,
-  images: ImageBank,
-  effect: Effect,
-) {
+function drawEffect(ctx: CanvasRenderingContext2D, images: ImageBank, effect: Effect) {
   if (effect.kind === "heal") {
     const image = images.monkEffect;
     const frame = Math.floor((effect.age / effect.duration) * (image.width / 192));
-    drawSprite(ctx, image, 192, frame, effect.x, effect.y + 35, 0.58);
+    drawSprite(ctx, image, 192, frame, effect.x, effect.y + 35, 0.62);
     return;
   }
   const key =
@@ -1587,52 +2048,93 @@ function drawEffect(
   const frameSize = image.height;
   const frames = Math.max(1, Math.floor(image.width / frameSize));
   const frame = Math.min(frames - 1, Math.floor((effect.age / effect.duration) * frames));
-  drawSprite(ctx, image, frameSize, frame, effect.x, effect.y + 15, 0.72);
+  drawSprite(ctx, image, frameSize, frame, effect.x, effect.y + 15, 0.76);
 }
 
-function drawStaticDecor(ctx: CanvasRenderingContext2D, images: ImageBank, time: number) {
-  const waterRocks = [
-    { key: "waterRock1" as const, x: 1010, y: 610, frame: 3 },
-    { key: "waterRock2" as const, x: 925, y: 690, frame: 9 },
-    { key: "waterRock1" as const, x: 22, y: 92, frame: 11 },
-  ];
-  for (const rock of waterRocks) {
+interface Decor {
+  key: AssetKey;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  frame?: number;
+  frameSize?: number;
+  occludes?: boolean;
+}
+
+const DECOR: Decor[] = [
+  { key: "rock1", x: 260, y: 410, w: 64, h: 64 },
+  { key: "rock4", x: 830, y: 760, w: 64, h: 64 },
+  { key: "rock3", x: 1400, y: 1060, w: 64, h: 64 },
+  { key: "rock2", x: 2020, y: 1860, w: 64, h: 64 },
+  { key: "bush1", x: 310, y: 920, w: 92, h: 92, frameSize: 128, frame: 1, occludes: true },
+  { key: "bush2", x: 1340, y: 480, w: 92, h: 92, frameSize: 128, frame: 5, occludes: true },
+  { key: "bush1", x: 2050, y: 880, w: 92, h: 92, frameSize: 128, frame: 3, occludes: true },
+  { key: "bush2", x: 2400, y: 1470, w: 92, h: 92, frameSize: 128, frame: 2, occludes: true },
+  { key: "deadTree", x: 2820, y: 420, w: 250, h: 210, occludes: true },
+  { key: "bones1", x: 2480, y: 440, w: 64, h: 64 },
+  { key: "bones2", x: 2780, y: 690, w: 64, h: 64 },
+  { key: "bones3", x: 2630, y: 820, w: 64, h: 64 },
+  { key: "skullSpike1", x: 2460, y: 650, w: 64, h: 128, occludes: true },
+  { key: "skullSpike2", x: 2860, y: 850, w: 64, h: 128, occludes: true },
+  { key: "fishHut", x: 2260, y: 350, w: 154, h: 154, frameSize: 192, occludes: true },
+  { key: "pirateTower", x: 2180, y: 520, w: 112, h: 168, occludes: true },
+  { key: "cannon", x: 2300, y: 545, w: 64, h: 64 },
+];
+
+function drawFenceLine(ctx: CanvasRenderingContext2D, images: ImageBank, x: number, y: number, count: number) {
+  for (let index = 0; index < count; index += 1) {
+    ctx.drawImage(images.woodenFence, 0, 0, 64, 64, x + index * 58, y, 64, 64);
+  }
+}
+
+function drawDecor(ctx: CanvasRenderingContext2D, images: ImageBank, state: GameState, decor: Decor) {
+  const alpha =
+    decor.occludes && unitOverlapsOccluder(state, decor.x, decor.y, decor.w * 0.42, decor.h * 0.76)
+      ? 0.3
+      : 1;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (decor.frameSize) {
     drawSprite(
       ctx,
-      images[rock.key],
-      64,
-      Math.floor(time * 7 + rock.frame),
-      rock.x,
-      rock.y,
+      images[decor.key],
+      decor.frameSize,
+      Math.floor(state.time * 7 + (decor.frame ?? 0)),
+      decor.x,
+      decor.y,
+      decor.w / decor.frameSize,
       1,
+      alpha,
     );
+  } else {
+    ctx.drawImage(images[decor.key], decor.x - decor.w / 2, decor.y - decor.h, decor.w, decor.h);
   }
+  ctx.restore();
+}
 
+function drawSeaDecor(ctx: CanvasRenderingContext2D, images: ImageBank, time: number) {
   const rocks = [
-    { key: "rock1" as const, x: 65, y: 705 },
-    { key: "rock4" as const, x: 845, y: 690 },
-    { key: "rock3" as const, x: 930, y: 470 },
+    { key: "waterRock1" as const, x: 104, y: 300, seed: 3 },
+    { key: "waterRock2" as const, x: 2920, y: 1180, seed: 9 },
+    { key: "waterRock1" as const, x: 1520, y: 110, seed: 11 },
+    { key: "waterRock2" as const, x: 1650, y: 1950, seed: 6 },
   ];
   for (const rock of rocks) {
-    const image = images[rock.key];
-    ctx.drawImage(image, rock.x - 32, rock.y - 48, 64, 64);
+    drawSprite(ctx, images[rock.key], 64, Math.floor(time * 7 + rock.seed), rock.x, rock.y, 1);
   }
-
-  const bushes = [
-    { key: "bush1" as const, x: 70, y: 255, seed: 0 },
-    { key: "bush2" as const, x: 830, y: 215, seed: 4 },
-    { key: "bush1" as const, x: 895, y: 475, seed: 2 },
+  const clouds = [
+    { key: "cloud1" as const, x: -70, y: 520, w: 330, h: 147, speed: 3 },
+    { key: "cloud2" as const, x: 2750, y: 980, w: 300, h: 134, speed: 4 },
+    { key: "cloud3" as const, x: 1080, y: 60, w: 270, h: 120, speed: 2 },
+    { key: "cloud1" as const, x: 1240, y: 1930, w: 310, h: 138, speed: 5 },
   ];
-  for (const bush of bushes) {
-    drawSprite(
-      ctx,
-      images[bush.key],
-      128,
-      Math.floor(time * 5 + bush.seed),
-      bush.x,
-      bush.y,
-      0.72,
-    );
+  for (const cloud of clouds) {
+    ctx.save();
+    ctx.globalAlpha = 0.76;
+    const drift = Math.sin(time * 0.08 * cloud.speed + cloud.x) * 24;
+    ctx.drawImage(images[cloud.key], cloud.x + drift, cloud.y, cloud.w, cloud.h);
+    ctx.restore();
   }
 }
 
@@ -1640,40 +2142,26 @@ export function renderGame(
   ctx: CanvasRenderingContext2D,
   images: ImageBank,
   state: GameState,
+  camera: Camera,
   drag?: { active: boolean; startX: number; startY: number; x: number; y: number },
 ) {
   ctx.imageSmoothingEnabled = false;
-  ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+  ctx.clearRect(0, 0, VIEW_W, VIEW_H);
   ctx.fillStyle = "#49aaab";
-  ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.save();
-  ctx.globalAlpha = 0.1;
-  ctx.strokeStyle = "#e6fff2";
-  ctx.lineWidth = 1;
-  for (let y = 20; y < WORLD_H; y += 34) {
-    ctx.beginPath();
-    for (let x = 0; x <= WORLD_W; x += 16) {
-      const yy = y + Math.sin(x * 0.028 + state.time * 1.4 + y) * 3;
-      if (x === 0) ctx.moveTo(x, yy);
-      else ctx.lineTo(x, yy);
-    }
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  drawIslandRect(ctx, images, 0, 128, 15, 10, state.time);
-  drawIslandRect(ctx, images, 832, 256, 4, 4, state.time);
-  drawIslandRect(ctx, images, 896, 0, 6, 8, state.time, "grassAutumn");
-  drawElevation(ctx, images, 128, 128, 5, 2, state.time);
-  drawStaticDecor(ctx, images, state.time);
+  ctx.translate(-Math.round(camera.x), -Math.round(camera.y));
+  drawTerrain(ctx, images, state, camera);
+  drawSeaDecor(ctx, images, state.time);
+  drawFenceLine(ctx, images, 2410, 910, 5);
+  drawFenceLine(ctx, images, 2500, 1190, 4);
 
   const queue: Array<{ y: number; draw: () => void }> = [];
+  for (const decor of DECOR) {
+    queue.push({ y: decor.y, draw: () => drawDecor(ctx, images, state, decor) });
+  }
   for (const node of state.nodes) {
-    queue.push({
-      y: node.y,
-      draw: () => drawResource(ctx, images, node, state.time),
-    });
+    queue.push({ y: node.y, draw: () => drawResource(ctx, images, state, node) });
   }
   for (const building of state.buildings) {
     if (building.hp <= 0) continue;
@@ -1683,17 +2171,16 @@ export function renderGame(
         drawBuilding(
           ctx,
           images,
+          state,
           building,
           state.selectedBuildingId === building.id,
-          state.time,
         ),
     });
   }
   for (const unit of state.units) {
     queue.push({
       y: unit.y,
-      draw: () =>
-        drawUnit(ctx, images, unit, state.selectedUnitIds.includes(unit.id)),
+      draw: () => drawUnit(ctx, images, unit, state.selectedUnitIds.includes(unit.id)),
     });
   }
   queue.sort((a, b) => a.y - b.y);
@@ -1703,47 +2190,28 @@ export function renderGame(
     ctx.save();
     ctx.translate(projectile.x, projectile.y);
     ctx.rotate(Math.atan2(-12, projectile.team === "player" ? 30 : -30));
-    ctx.drawImage(images.arrow, -20, -8, 40, 40);
+    ctx.drawImage(images.arrow, -22, -9, 44, 44);
     ctx.restore();
   }
   for (const effect of state.effects) drawEffect(ctx, images, effect);
 
-  if (
-    state.buildMode &&
-    state.hoverBuildX !== undefined &&
-    state.hoverBuildY !== undefined
-  ) {
+  if (state.buildMode && state.hoverBuildX !== undefined && state.hoverBuildY !== undefined) {
     const kind = state.buildMode;
     const valid = placementIsValid(state, state.hoverBuildX, state.hoverBuildY);
-    const ghost = createBuilding(
-      -1,
-      kind,
-      "player",
-      state.hoverBuildX,
-      state.hoverBuildY,
-    );
+    const ghost = createBuilding(-1, kind, "player", state.hoverBuildX, state.hoverBuildY);
     ctx.save();
     ctx.globalAlpha = valid ? 0.65 : 0.42;
     ctx.filter = valid ? "none" : "sepia(1) saturate(5) hue-rotate(320deg)";
-    drawBuilding(ctx, images, ghost, false, state.time);
+    drawBuilding(ctx, images, state, ghost, false);
     ctx.restore();
     ctx.strokeStyle = valid ? "#9ef08e" : "#ff6b5f";
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.ellipse(
-      state.hoverBuildX,
-      state.hoverBuildY,
-      kind === "tower" ? 50 : 64,
-      24,
-      0,
-      0,
-      Math.PI * 2,
-    );
+    ctx.ellipse(state.hoverBuildX, state.hoverBuildY, kind === "tower" ? 54 : 68, 27, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
-
   if (state.marker) {
-    const radius = 14 + state.marker.age * 24;
+    const radius = 15 + state.marker.age * 26;
     ctx.strokeStyle =
       state.marker.kind === "invalid"
         ? "#ff5f54"
@@ -1759,7 +2227,6 @@ export function renderGame(
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
-
   if (drag?.active) {
     const left = Math.min(drag.startX, drag.x);
     const top = Math.min(drag.startY, drag.y);
@@ -1771,6 +2238,56 @@ export function renderGame(
     ctx.fillRect(left, top, width, height);
     ctx.strokeRect(left, top, width, height);
   }
+  ctx.restore();
+
+  const edge = ctx.createLinearGradient(0, 0, 0, VIEW_H);
+  edge.addColorStop(0, "rgba(21,52,65,.12)");
+  edge.addColorStop(0.1, "transparent");
+  edge.addColorStop(0.9, "transparent");
+  edge.addColorStop(1, "rgba(21,52,65,.16)");
+  ctx.fillStyle = edge;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+}
+
+export function renderMinimap(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  camera: Camera,
+) {
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  const sx = w / WORLD_W;
+  const sy = h / WORLD_H;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#3f9fa5";
+  ctx.fillRect(0, 0, w, h);
+  for (let r = 0; r < ROWS; r += 1) {
+    for (let c = 0; c < COLS; c += 1) {
+      const terrain = terrainAtCell(c, r);
+      if (terrain === "water") continue;
+      ctx.fillStyle =
+        terrain === "bridge"
+          ? "#b88852"
+          : terrain === "hill"
+            ? "#759b74"
+            : terrain === "autumn"
+              ? "#aab758"
+              : "#8fbd67";
+      ctx.fillRect(c * TILE * sx, r * TILE * sy, TILE * sx + 1, TILE * sy + 1);
+    }
+  }
+  for (const building of state.buildings) {
+    if (building.hp <= 0) continue;
+    ctx.fillStyle = building.team === "player" ? "#f6df7f" : "#e45e51";
+    ctx.fillRect(building.x * sx - 2, building.y * sy - 2, 5, 5);
+  }
+  for (const unit of state.units) {
+    ctx.fillStyle = unit.team === "player" ? "#dff5c3" : "#802f38";
+    ctx.fillRect(unit.x * sx - 1, unit.y * sy - 1, unit.boss ? 5 : 3, unit.boss ? 5 : 3);
+  }
+  ctx.strokeStyle = "#fff4b5";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(camera.x * sx, camera.y * sy, VIEW_W * sx, VIEW_H * sy);
 }
 
 export function renderMenuWorld(
@@ -1778,56 +2295,8 @@ export function renderMenuWorld(
   images: ImageBank,
   time: number,
 ) {
-  ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = "#49aaab";
-  ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-
-  drawIslandRect(ctx, images, 90, 150, 11, 8, time);
-  drawIslandRect(ctx, images, 860, 70, 5, 5, time, "grassDeep");
-  drawElevation(ctx, images, 195, 150, 5, 2, time);
-
-  const castle = createBuilding(-1, "castle", "player", 380, 460);
-  drawBuilding(ctx, images, castle, false, time);
-  drawBuilding(
-    ctx,
-    images,
-    createBuilding(-2, "tower", "player", 140, 620),
-    false,
-    time,
-  );
-  drawBuilding(
-    ctx,
-    images,
-    createBuilding(-3, "house", "player", 640, 620),
-    false,
-    time,
-  );
-  drawBuilding(
-    ctx,
-    images,
-    createBuilding(-4, "cave", "enemy", 1030, 300),
-    false,
-    time,
-  );
-
-  const units = [
-    createUnit(-10, "warrior", "player", 490, 580),
-    createUnit(-11, "lancer", "player", 565, 565),
-    createUnit(-12, "pawn", "player", 700, 570),
-    createUnit(-13, "gnome", "enemy", 940, 390),
-    createUnit(-14, "gnoll", "enemy", 1050, 430),
-  ];
-  units.forEach((unit, index) => {
-    unit.anim = time + index * 0.28;
-    unit.facing = unit.team === "player" ? 1 : -1;
-    drawUnit(ctx, images, unit, false);
-  });
-
-  const tree = images.tree2;
-  ctx.drawImage(tree, 685, 225, tree.width * 0.67, tree.height * 0.67);
-  const cloud = images.cloud1;
-  ctx.save();
-  ctx.globalAlpha = 0.8;
-  ctx.drawImage(cloud, 820 + Math.sin(time * 0.15) * 18, 570, 360, 160);
-  ctx.restore();
+  const state = createInitialGame(false, "stage", 1);
+  state.time = time;
+  const camera = { x: 80, y: 1060 };
+  renderGame(ctx, images, state, camera);
 }

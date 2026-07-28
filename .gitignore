@@ -24,3 +24,7 @@ Thumbs.db
 
 # original editable packs; normalized runtime assets are in public/game-assets
 /assets/
+
+# local gameplay reports and raw reference packs; selected game assets are copied
+# into public/game-assets so this folder is not shipped to Vercel
+/GAME_ANYLYZE/

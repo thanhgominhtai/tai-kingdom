@@ -568,7 +568,7 @@ canvas {
 }
 
 .lesson-grid article:last-child {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .lesson-art {
@@ -709,16 +709,143 @@ canvas {
   font-weight: 900;
 }
 
+.mode-panel {
+  position: relative;
+  z-index: 3;
+  width: min(980px, calc(100% - 36px));
+  padding: 70px 58px 38px;
+}
+
+.mode-screen .mode-panel {
+  margin-top: 38px;
+}
+
+.mode-panel .ribbon-title {
+  position: absolute;
+  top: -34px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin: 24px 0;
+}
+
+.mode-card {
+  display: grid;
+  min-height: 310px;
+  grid-template-rows: 150px 1fr;
+  overflow: hidden;
+  border: 5px solid #8d7150;
+  border-radius: 9px;
+  padding: 0;
+  cursor: pointer;
+  background:
+    repeating-linear-gradient(
+      104deg,
+      rgba(114, 80, 40, 0.04) 0 2px,
+      transparent 2px 8px
+    ),
+    linear-gradient(#f7e8b8, #dfca8e);
+  box-shadow:
+    inset 0 0 0 3px #fff1c5,
+    0 8px 0 #604b43,
+    0 14px 26px rgba(41, 55, 62, 0.25);
+  color: var(--ink);
+  text-align: left;
+  transition:
+    transform 120ms ease,
+    filter 120ms ease;
+}
+
+.mode-card:hover,
+.mode-card:focus-visible {
+  z-index: 2;
+  filter: brightness(1.06);
+  outline: 4px solid #ffe071;
+  transform: translateY(-5px);
+}
+
+.mode-art {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-bottom: 4px solid #9c7b55;
+  background:
+    radial-gradient(circle at 50% 110%, #9dc566 0 45%, transparent 46%),
+    linear-gradient(#57aeb0, #72b6a6);
+}
+
+.mode-art > img {
+  position: absolute;
+  left: 18%;
+  bottom: -18px;
+  width: 190px;
+  height: 165px;
+  object-fit: contain;
+}
+
+.mode-art .sprite-preview {
+  position: absolute;
+  right: 4%;
+  bottom: -13px;
+  width: 150px;
+  height: 150px;
+}
+
+.endless-card .mode-art {
+  background:
+    radial-gradient(circle at 50% 110%, #80ad6d 0 47%, transparent 48%),
+    linear-gradient(#4d989f, #4f8387);
+}
+
+.mode-copy {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 17px 20px 20px;
+}
+
+.mode-copy small {
+  color: #337184;
+  font-size: 0.62rem;
+  font-weight: 950;
+  letter-spacing: 0.07em;
+}
+
+.mode-copy strong {
+  color: #343d49;
+  font-family: Georgia, serif;
+  font-size: 1.48rem;
+}
+
+.mode-copy em {
+  color: #5a6066;
+  font-size: 0.76rem;
+  font-style: normal;
+  line-height: 1.5;
+}
+
+.mode-copy b {
+  margin-top: 3px;
+  color: #8d4d3d;
+  font-size: 0.69rem;
+}
+
 /* Battlefield */
 
 .game-screen {
-  --ui-multiplier: 1;
-  display: grid;
+  --ui-multiplier: 1.06;
+  position: relative;
+  display: block;
+  width: 100vw;
+  height: 100dvh;
   min-height: 100dvh;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 7px;
   overflow: hidden;
-  padding: 7px;
+  padding: 0;
   background:
     linear-gradient(rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)),
     var(--water);
@@ -726,11 +853,14 @@ canvas {
 }
 
 .game-screen.large-ui {
-  --ui-multiplier: 1.12;
+  --ui-multiplier: 1.17;
 }
 
 .game-top-hud,
 .command-deck {
+  position: absolute;
+  right: 8px;
+  left: 8px;
   z-index: 10;
   display: flex;
   min-height: calc(94px * var(--ui-multiplier));
@@ -738,6 +868,10 @@ canvas {
   justify-content: space-between;
   gap: 12px;
   padding: 0 7px;
+}
+
+.game-top-hud {
+  top: 8px;
 }
 
 .resource-strip {
@@ -802,7 +936,31 @@ canvas {
 
 .hud-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
+}
+
+.speed-controls {
+  display: flex;
+  gap: 3px;
+  margin-right: 4px;
+  padding-right: 8px;
+  border-right: 2px solid rgba(255, 231, 163, 0.25);
+}
+
+.hud-actions .speed-controls button {
+  width: calc(40px * var(--ui-multiplier));
+  height: calc(40px * var(--ui-multiplier));
+  border-width: 3px;
+  font-size: calc(0.7rem * var(--ui-multiplier));
+}
+
+.hud-actions .speed-controls button.active {
+  background: linear-gradient(#e8b24e, #bd7739);
+  box-shadow:
+    inset 0 0 0 3px #8b4f33,
+    0 4px 0 #5d3c35;
+  color: #fff7c5;
 }
 
 .hud-actions button {
@@ -824,14 +982,13 @@ canvas {
 
 .battlefield-shell {
   position: relative;
-  width: min(100%, calc((100dvh - 258px * var(--ui-multiplier)) * 1.6667));
-  max-height: calc(100dvh - 258px * var(--ui-multiplier));
-  aspect-ratio: 5 / 3;
-  align-self: center;
-  justify-self: center;
+  width: 100vw;
+  height: 100dvh;
+  max-height: none;
+  aspect-ratio: auto;
   overflow: hidden;
-  border: 5px solid #2f596b;
-  border-radius: 5px;
+  border: 0;
+  border-radius: 0;
   background: var(--water);
   box-shadow:
     0 11px 0 rgba(41, 69, 82, 0.55),
@@ -864,8 +1021,8 @@ canvas {
 }
 
 .castle-vitals {
-  top: 10px;
-  left: 10px;
+  top: calc(112px * var(--ui-multiplier));
+  left: 12px;
   display: flex;
   width: 230px;
   align-items: center;
@@ -910,8 +1067,8 @@ canvas {
 }
 
 .objective-scroll {
-  top: 10px;
-  right: 10px;
+  top: calc(112px * var(--ui-multiplier));
+  right: 12px;
   display: grid;
   max-width: 350px;
   padding: 9px 12px;
@@ -928,9 +1085,37 @@ canvas {
   line-height: 1.35;
 }
 
+.minimap-frame {
+  left: 12px;
+  bottom: calc(152px * var(--ui-multiplier));
+  display: grid;
+  width: min(238px, 25%);
+  padding: 5px;
+  gap: 3px;
+}
+
+.minimap-frame canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 3px solid #405769;
+  background: #3f9fa5;
+  cursor: pointer;
+  image-rendering: pixelated;
+}
+
+.minimap-frame span {
+  color: #56606a;
+  font-size: 0.57rem;
+  font-weight: 900;
+  text-align: center;
+}
+
 .tutorial-scroll {
+  position: absolute;
+  z-index: 7;
   right: 16px;
-  bottom: 16px;
+  bottom: calc(158px * var(--ui-multiplier));
   display: flex;
   width: min(440px, 48%);
   align-items: center;
@@ -1083,6 +1268,7 @@ canvas {
 }
 
 .command-deck {
+  bottom: 8px;
   min-height: calc(130px * var(--ui-multiplier));
   justify-content: flex-start;
 }
@@ -1488,8 +1674,14 @@ canvas {
   }
 
   .language-grid,
-  .lesson-grid {
+  .lesson-grid,
+  .mode-grid {
     grid-template-columns: 1fr;
+  }
+
+  .mode-panel {
+    margin-top: 58px;
+    padding: 62px 22px 30px;
   }
 
   .lesson-grid article:last-child {
@@ -1525,8 +1717,9 @@ canvas {
   }
 
   .battlefield-shell {
-    width: min(100%, calc((100dvh - 222px) * 1.6667));
-    max-height: calc(100dvh - 222px);
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
   }
 
   .menu-composition {
