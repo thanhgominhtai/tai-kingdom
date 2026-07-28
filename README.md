@@ -1,98 +1,42 @@
-# vinext-starter
+# tai'kingdom
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Web game chiến thuật thời gian thực 2D, xây bằng React + TypeScript + Canvas.
+Đồ họa sử dụng Tiny Swords của Pixel Frog.
 
-## Prerequisites
+## Chạy trong VS Code
 
-- Node.js `>=22.13.0`
-
-## Quick Start
+Yêu cầu Node.js 20.19 trở lên.
 
 ```bash
 npm install
 npm run dev
+```
+
+Mở địa chỉ Vite in ra trong Terminal, mặc định là
+`http://localhost:5173`.
+
+## Kiểm tra bản production
+
+```bash
 npm run build
+npm run preview
 ```
 
-This starter does not use `wrangler.jsonc`.
+Thư mục `dist/` là bản web tĩnh sau khi build. Nếu muốn dùng extension Live
+Server, hãy mở riêng thư mục `dist` làm workspace rồi chạy Live Server từ
+`dist/index.html`.
 
-## Included Shape
+## Deploy Vercel
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+Import repository vào Vercel. Dự án đã có `vercel.json`, Vercel sẽ chạy
+`npm run build` và publish thư mục `dist`.
 
-## Workspace Auth Headers
+## Cấu trúc chính
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- `src/GameApp.tsx`: menu, HUD, song ngữ và luồng màn hình.
+- `src/game/engine.ts`: mô phỏng RTS, xử lý input và vẽ Canvas.
+- `src/game/assets.ts`: danh sách asset tải vào game.
+- `src/game/i18n.ts`: nội dung Việt/Anh.
+- `src/styles.css`: giao diện parchment, ribbon và wood table.
+- `public/game-assets`: asset runtime đã chuẩn hóa tên.
+- `assets`: ba pack gốc để tiếp tục phát triển; thư mục này không đưa lên Git.

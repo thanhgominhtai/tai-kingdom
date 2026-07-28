@@ -1,0 +1,1462 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { loadGameImages, type ImageBank } from "./game/assets";
+import {
+  BUILD_COST,
+  BUILDING_SPEC,
+  UNIT_COST,
+  WORLD_H,
+  WORLD_W,
+  beginBuild,
+  cancelBuild,
+  createInitialGame,
+  getHoverTarget,
+  issueCommand,
+  placeBuilding,
+  population,
+  renderGame,
+  renderMenuWorld,
+  restoreGame,
+  selectArea,
+  selectPoint,
+  serializeGame,
+  setBuildHover,
+  trainUnit,
+  updateGame,
+  type Building,
+  type BuildingKind,
+  type GameState,
+  type HoverTarget,
+  type PlayerUnitKind,
+  type ResourceKind,
+  type UnitKind,
+} from "./game/engine";
+import {
+  translator,
+  type CopyKey,
+  type Locale,
+} from "./game/i18n";
+
+type Screen =
+  | "language"
+  | "menu"
+  | "how"
+  | "settings"
+  | "credits"
+  | "game"
+  | "victory"
+  | "defeat";
+
+interface Settings {
+  tooltips: boolean;
+  tutorial: boolean;
+  sound: boolean;
+  largeUi: boolean;
+}
+
+const DEFAULT_SETTINGS: Settings = {
+  tooltips: true,
+  tutorial: true,
+  sound: true,
+  largeUi: false,
+};
+
+const SAVE_KEY = "tai-kingdom-campaign-v2";
+const LOCALE_KEY = "tai-kingdom-locale";
+const SETTINGS_KEY = "tai-kingdom-settings-v2";
+
+function PaperButton({
+  children,
+  tone = "blue",
+  className = "",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  tone?: "blue" | "red" | "plain";
+}) {
+  return (
+    <button
+      className={`pixel-button pixel-button-${tone} ${className}`}
+      {...props}
+    >
+      <span>{children}</span>
+    </button>
+  );
+}
+
+function RibbonTitle({
+  children,
+  size = "large",
+}: {
+  children: React.ReactNode;
+  size?: "large" | "small";
+}) {
+  return (
+    <div className={`ribbon-title ribbon-title-${size}`}>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function SpritePreview({
+  src,
+  className = "",
+}: {
+  src: string;
+  className?: string;
+}) {
+  return (
+    <span
+      className={`sprite-preview ${className}`}
+      style={{ backgroundImage: `url("${src}")` }}
+      aria-hidden="true"
+    />
+  );
+}
+
+function MenuWorld() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    let frame = 0;
+    const started = performance.now();
+
+    loadGameImages().then((images) => {
+      if (!active) return;
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) return;
+      const paint = (now: number) => {
+        if (!active) return;
+        renderMenuWorld(ctx, images, (now - started) / 1000);
+        frame = requestAnimationFrame(paint);
+      };
+      frame = requestAnimationFrame(paint);
+    });
+
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="menu-world-canvas"
+      width={WORLD_W}
+      height={WORLD_H}
+      aria-hidden="true"
+    />
+  );
+}
+
+function LanguageScreen({
+  onChoose,
+}: {
+  onChoose: (locale: Locale) => void;
+}) {
+  return (
+    <main className="storybook-screen language-screen">
+      <MenuWorld />
+      <div className="screen-vignette" />
+      <section className="paper-panel language-panel" aria-labelledby="language-title">
+        <RibbonTitle>tai&apos;kingdom</RibbonTitle>
+        <h1 id="language-title">Choose your language</h1>
+        <p>Chọn ngôn ngữ để bắt đầu hành trình.</p>
+        <div className="language-grid">
+          <PaperButton onClick={() => onChoose("vi")}>
+            <strong>VI</strong>
+            <span>Tiếng Việt</span>
+          </PaperButton>
+          <PaperButton onClick={() => onChoose("en")}>
+            <strong>EN</strong>
+            <span>English</span>
+          </PaperButton>
+        </div>
+        <small>Language can be changed later in Settings.</small>
+      </section>
+    </main>
+  );
+}
+
+function MenuScreen({
+  locale,
+  hasSave,
+  onNavigate,
+  onNewGame,
+  onContinue,
+  onLocale,
+}: {
+  locale: Locale;
+  hasSave: boolean;
+  onNavigate: (screen: Screen) => void;
+  onNewGame: () => void;
+  onContinue: () => void;
+  onLocale: (locale: Locale) => void;
+}) {
+  const t = translator(locale);
+  return (
+    <main className="storybook-screen menu-screen">
+      <MenuWorld />
+      <div className="screen-vignette" />
+
+      <header className="menu-topbar">
+        <span className="chapter-badge">{t("missionLabel")} · TINY SWORDS RTS</span>
+        <div className="language-tabs" aria-label={t("chooseLanguage")}>
+          <button
+            className={locale === "vi" ? "active" : ""}
+            onClick={() => onLocale("vi")}
+          >
+            VI
+          </button>
+          <span>/</span>
+          <button
+            className={locale === "en" ? "active" : ""}
+            onClick={() => onLocale("en")}
+          >
+            EN
+          </button>
+        </div>
+      </header>
+
+      <div className="menu-composition">
+        <section className="title-lockup">
+          <div className="shield-mark">TK</div>
+          <RibbonTitle>tai&apos;kingdom</RibbonTitle>
+          <p>{t("gameTagline")}</p>
+        </section>
+
+        <section className="wood-panel main-menu-panel" aria-label="Main menu">
+          <span className="panel-kicker">{t("missionLabel")}</span>
+          <h2>{t("missionName")}</h2>
+          <div className="menu-actions">
+            <PaperButton tone="red" onClick={onNewGame}>
+              <span className="button-glyph">⚔</span>
+              {t("newGame")}
+            </PaperButton>
+            <PaperButton
+              onClick={onContinue}
+              disabled={!hasSave}
+              data-tip={hasSave ? t("saveNote") : t("saveNote")}
+            >
+              <span className="button-glyph">▶</span>
+              {t("continue")}
+            </PaperButton>
+            <PaperButton tone="plain" onClick={() => onNavigate("how")}>
+              <span className="button-glyph">?</span>
+              {t("howToPlay")}
+            </PaperButton>
+            <PaperButton tone="plain" onClick={() => onNavigate("settings")}>
+              <span className="button-glyph">⚙</span>
+              {t("settings")}
+            </PaperButton>
+            <button
+              className="text-link"
+              onClick={() => onNavigate("credits")}
+            >
+              {t("credits")}
+            </button>
+          </div>
+        </section>
+
+        <aside className="paper-panel mission-card">
+          <span className="panel-kicker">{t("missionLabel")}</span>
+          <h2>{t("missionName")}</h2>
+          <p>{t("missionDesc")}</p>
+          <div className="mission-summary">
+            <span>
+              <img src="/game-assets/ui/wood.png" alt="" /> 3 {t("wave")}
+            </span>
+            <span>
+              <SpritePreview src="/game-assets/units/warrior-idle.png" /> 5{" "}
+              {t("units")}
+            </span>
+            <span>
+              <SpritePreview src="/game-assets/enemies/cave.png" /> Root Den
+            </span>
+          </div>
+          <PaperButton tone="red" onClick={onNewGame}>
+            {t("startMission")}
+          </PaperButton>
+        </aside>
+      </div>
+    </main>
+  );
+}
+
+function HowScreen({
+  locale,
+  onBack,
+}: {
+  locale: Locale;
+  onBack: () => void;
+}) {
+  const t = translator(locale);
+  const cards = [
+    {
+      title: t("howSelectTitle"),
+      text: t("howSelectText"),
+      image: "/game-assets/units/pawn-idle.png",
+      sprite: true,
+    },
+    {
+      title: t("howSmartTitle"),
+      text: t("howSmartText"),
+      image: "/game-assets/ui/cursor.png",
+      sprite: false,
+    },
+    {
+      title: t("howEconomyTitle"),
+      text: t("howEconomyText"),
+      image: "/game-assets/resources/tree2.png",
+      sprite: false,
+    },
+    {
+      title: t("howArmyTitle"),
+      text: t("howArmyText"),
+      image: "/game-assets/buildings/barracks.png",
+      sprite: false,
+    },
+    {
+      title: t("howWinTitle"),
+      text: t("howWinText"),
+      image: "/game-assets/enemies/cave.png",
+      sprite: true,
+    },
+  ];
+
+  return (
+    <main className="storybook-screen modal-screen">
+      <MenuWorld />
+      <div className="screen-vignette" />
+      <section className="paper-panel book-panel">
+        <RibbonTitle>{t("howTitle")}</RibbonTitle>
+        <p className="book-intro">{t("howIntro")}</p>
+        <div className="lesson-grid">
+          {cards.map((card) => (
+            <article key={card.title}>
+              <div className="lesson-art">
+                {card.sprite ? (
+                  <SpritePreview src={card.image} />
+                ) : (
+                  <img src={card.image} alt="" />
+                )}
+              </div>
+              <div>
+                <h2>{card.title}</h2>
+                <p>{card.text}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+        <div className="panel-footer">
+          <PaperButton onClick={onBack}>{t("back")}</PaperButton>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function ToggleRow({
+  label,
+  value,
+  onChange,
+  t,
+}: {
+  label: string;
+  value: boolean;
+  onChange: () => void;
+  t: ReturnType<typeof translator>;
+}) {
+  return (
+    <div className="setting-row">
+      <span>{label}</span>
+      <button
+        className={`toggle-switch ${value ? "enabled" : ""}`}
+        onClick={onChange}
+        aria-pressed={value}
+      >
+        <i />
+        {value ? t("on") : t("off")}
+      </button>
+    </div>
+  );
+}
+
+function SettingsScreen({
+  locale,
+  settings,
+  onSettings,
+  onLocale,
+  onBack,
+}: {
+  locale: Locale;
+  settings: Settings;
+  onSettings: (settings: Settings) => void;
+  onLocale: (locale: Locale) => void;
+  onBack: () => void;
+}) {
+  const t = translator(locale);
+  const flip = (key: keyof Settings) =>
+    onSettings({ ...settings, [key]: !settings[key] });
+
+  return (
+    <main className="storybook-screen modal-screen">
+      <MenuWorld />
+      <div className="screen-vignette" />
+      <section className="paper-panel settings-book">
+        <RibbonTitle>{t("settings")}</RibbonTitle>
+        <div className="setting-row language-setting">
+          <span>{t("chooseLanguage")}</span>
+          <div className="language-tabs paper-tabs">
+            <button
+              className={locale === "vi" ? "active" : ""}
+              onClick={() => onLocale("vi")}
+            >
+              VI
+            </button>
+            <button
+              className={locale === "en" ? "active" : ""}
+              onClick={() => onLocale("en")}
+            >
+              EN
+            </button>
+          </div>
+        </div>
+        <ToggleRow
+          label={t("tooltips")}
+          value={settings.tooltips}
+          onChange={() => flip("tooltips")}
+          t={t}
+        />
+        <ToggleRow
+          label={t("tutorialHints")}
+          value={settings.tutorial}
+          onChange={() => flip("tutorial")}
+          t={t}
+        />
+        <ToggleRow
+          label={t("sound")}
+          value={settings.sound}
+          onChange={() => flip("sound")}
+          t={t}
+        />
+        <ToggleRow
+          label={`${t("uiScale")}: ${settings.largeUi ? t("large") : t("normal")}`}
+          value={settings.largeUi}
+          onChange={() => flip("largeUi")}
+          t={t}
+        />
+        <div className="panel-footer">
+          <PaperButton onClick={onBack}>{t("back")}</PaperButton>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function CreditsScreen({
+  locale,
+  onBack,
+}: {
+  locale: Locale;
+  onBack: () => void;
+}) {
+  const t = translator(locale);
+  return (
+    <main className="storybook-screen modal-screen">
+      <MenuWorld />
+      <div className="screen-vignette" />
+      <section className="paper-panel credits-panel">
+        <RibbonTitle>{t("credits")}</RibbonTitle>
+        <div className="credits-art">
+          <img src="/game-assets/buildings/castle.png" alt="" />
+          <SpritePreview src="/game-assets/units/warrior-idle.png" />
+          <SpritePreview src="/game-assets/enemies/minotaur-idle.png" />
+        </div>
+        <p>{t("artCredit")}</p>
+        <a
+          href="https://pixelfrog-assets.itch.io/tiny-swords"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {t("artLink")} ↗
+        </a>
+        <div className="panel-footer">
+          <PaperButton onClick={onBack}>{t("back")}</PaperButton>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+interface HudSnapshot {
+  resources: Record<ResourceKind, number>;
+  population: number;
+  populationCap: number;
+  wave: number;
+  totalWaves: number;
+  waveClock: number;
+  waveActive: boolean;
+  enemies: number;
+  castleHp: number;
+  castleMaxHp: number;
+  selectedUnits: UnitKind[];
+  selectedBuilding?: Building;
+  tutorialStep: number;
+  tutorialEnabled: boolean;
+  buildMode?: "house" | "tower";
+  notice: GameState["notice"];
+  outcome: GameState["outcome"];
+}
+
+function makeSnapshot(state: GameState): HudSnapshot {
+  const castle = state.buildings.find((building) => building.kind === "castle");
+  return {
+    resources: { ...state.resources },
+    population: population(state),
+    populationCap: state.populationCap,
+    wave: state.wave,
+    totalWaves: state.totalWaves,
+    waveClock: state.waveClock,
+    waveActive: state.waveActive,
+    enemies: state.units.filter((unit) => unit.team === "enemy").length,
+    castleHp: Math.ceil(castle?.hp ?? 0),
+    castleMaxHp: castle?.maxHp ?? 1500,
+    selectedUnits: state.units
+      .filter((unit) => state.selectedUnitIds.includes(unit.id))
+      .map((unit) => unit.kind),
+    selectedBuilding: state.buildings.find(
+      (building) => building.id === state.selectedBuildingId,
+    ),
+    tutorialStep: state.tutorialStep,
+    tutorialEnabled: state.tutorialEnabled,
+    buildMode: state.buildMode,
+    notice: state.notice,
+    outcome: state.outcome,
+  };
+}
+
+function worldPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ((clientX - rect.left) / rect.width) * WORLD_W,
+    y: ((clientY - rect.top) / rect.height) * WORLD_H,
+    screenX: clientX - rect.left,
+    screenY: clientY - rect.top,
+  };
+}
+
+function nameKey(kind: UnitKind | BuildingKind | ResourceKind): CopyKey {
+  if (kind === "goblinHouse") return "house";
+  if (kind === "goblinTower") return "tower";
+  return kind as CopyKey;
+}
+
+function descriptionKey(kind: UnitKind | BuildingKind | ResourceKind): CopyKey | null {
+  const map: Partial<Record<UnitKind | BuildingKind | ResourceKind, CopyKey>> = {
+    pawn: "gatherer",
+    warrior: "melee",
+    lancer: "defender",
+    archer: "ranged",
+    monk: "healer",
+    castle: "castleDesc",
+    house: "houseDesc",
+    tower: "towerDesc",
+    barracks: "barracksDesc",
+    archery: "archeryDesc",
+    monastery: "monasteryDesc",
+    goblinHouse: "houseDesc",
+    goblinTower: "towerDesc",
+  };
+  return map[kind] ?? null;
+}
+
+function ResourceHud({
+  kind,
+  value,
+  label,
+}: {
+  kind: ResourceKind;
+  value: number;
+  label: string;
+}) {
+  return (
+    <div className="resource-hud" data-tip={label}>
+      <img src={`/game-assets/ui/${kind}.png`} alt="" />
+      <span>
+        <small>{label}</small>
+        <strong>{Math.floor(value)}</strong>
+      </span>
+    </div>
+  );
+}
+
+function CostLine({
+  cost,
+}: {
+  cost: { wood: number; gold: number; meat: number };
+}) {
+  return (
+    <span className="cost-line">
+      {(["wood", "gold", "meat"] as ResourceKind[])
+        .filter((kind) => cost[kind] > 0)
+        .map((kind) => (
+          <i key={kind}>
+            <img src={`/game-assets/ui/${kind}.png`} alt="" />
+            {cost[kind]}
+          </i>
+        ))}
+    </span>
+  );
+}
+
+function CommandButton({
+  image,
+  title,
+  description,
+  cost,
+  onClick,
+  disabled,
+  sprite = false,
+}: {
+  image: string;
+  title: string;
+  description: string;
+  cost?: { wood: number; gold: number; meat: number };
+  onClick: () => void;
+  disabled?: boolean;
+  sprite?: boolean;
+}) {
+  return (
+    <button
+      className="command-button"
+      onClick={onClick}
+      disabled={disabled}
+      data-tip={`${title} — ${description}`}
+    >
+      <span className="command-art">
+        {sprite ? <SpritePreview src={image} /> : <img src={image} alt="" />}
+      </span>
+      <span className="command-copy">
+        <strong>{title}</strong>
+        {cost && <CostLine cost={cost} />}
+      </span>
+    </button>
+  );
+}
+
+function CommandDeck({
+  state,
+  t,
+  onTrain,
+  onBuild,
+}: {
+  state: HudSnapshot;
+  t: ReturnType<typeof translator>;
+  onTrain: (kind: PlayerUnitKind) => void;
+  onBuild: (kind: "house" | "tower") => void;
+}) {
+  const building = state.selectedBuilding;
+  const pawnSelected = state.selectedUnits.includes("pawn");
+
+  const training: PlayerUnitKind[] =
+    building?.kind === "castle"
+      ? ["pawn"]
+      : building?.kind === "barracks"
+        ? ["warrior", "lancer"]
+        : building?.kind === "archery"
+          ? ["archer"]
+          : building?.kind === "monastery"
+            ? ["monk"]
+            : [];
+
+  const unitImages: Record<PlayerUnitKind, string> = {
+    pawn: "/game-assets/units/pawn-idle.png",
+    warrior: "/game-assets/units/warrior-idle.png",
+    lancer: "/game-assets/units/lancer-idle.png",
+    archer: "/game-assets/units/archer-idle.png",
+    monk: "/game-assets/units/monk-idle.png",
+  };
+  const descriptions: Record<PlayerUnitKind, CopyKey> = {
+    pawn: "gatherer",
+    warrior: "melee",
+    lancer: "defender",
+    archer: "ranged",
+    monk: "healer",
+  };
+  const buildingImages: Record<BuildingKind, string> = {
+    castle: "/game-assets/buildings/castle.png",
+    house: "/game-assets/buildings/house1.png",
+    barracks: "/game-assets/buildings/barracks.png",
+    archery: "/game-assets/buildings/archery.png",
+    monastery: "/game-assets/buildings/monastery.png",
+    tower: "/game-assets/buildings/tower.png",
+    cave: "/game-assets/enemies/cave.png",
+    goblinHouse: "/game-assets/enemies/goblin-house.png",
+    goblinTower: "/game-assets/enemies/goblin-tower.png",
+  };
+
+  if (building) {
+    return (
+      <>
+        <div className="selection-card">
+          <span className="selection-portrait">
+            {building.kind === "cave" ? (
+              <SpritePreview src={buildingImages[building.kind]} />
+            ) : (
+              <img src={buildingImages[building.kind]} alt="" />
+            )}
+          </span>
+          <span>
+            <small>{t("selected")}</small>
+            <strong>{t(nameKey(building.kind))}</strong>
+            <em>
+              {Math.ceil(building.hp)} / {building.maxHp} {t("health")}
+            </em>
+          </span>
+        </div>
+        <div className="commands-group">
+          {building.queue ? (
+            <div className="training-readout">
+              <strong>
+                {t("queued")}: {t(building.queue.kind)}
+              </strong>
+              <div>
+                <i
+                  style={{
+                    width: `${Math.max(
+                      0,
+                      100 - (building.queue.remaining / building.queue.total) * 100,
+                    )}%`,
+                  }}
+                />
+              </div>
+              <small>
+                {Math.ceil(building.queue.remaining)} {t("seconds")}
+              </small>
+            </div>
+          ) : training.length ? (
+            training.map((kind) => (
+              <CommandButton
+                key={kind}
+                image={unitImages[kind]}
+                title={t(kind)}
+                description={t(descriptions[kind])}
+                cost={UNIT_COST[kind]}
+                onClick={() => onTrain(kind)}
+                sprite
+              />
+            ))
+          ) : (
+            <p className="command-description">
+              {descriptionKey(building.kind)
+                ? t(descriptionKey(building.kind)!)
+                : t("selectPrompt")}
+            </p>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  if (state.selectedUnits.length) {
+    const unique = Array.from(new Set(state.selectedUnits));
+    return (
+      <>
+        <div className="selection-card">
+          <span className="selection-portrait multi-portrait">
+            {unique.slice(0, 2).map((kind) => (
+              <SpritePreview
+                key={kind}
+                src={`/game-assets/units/${kind}-idle.png`}
+              />
+            ))}
+          </span>
+          <span>
+            <small>{t("selected")}</small>
+            <strong>
+              {state.selectedUnits.length} {t("units")}
+            </strong>
+            <em>{unique.map((kind) => t(nameKey(kind))).join(" · ")}</em>
+          </span>
+        </div>
+        <div className="commands-group">
+          {pawnSelected ? (
+            <>
+              <CommandButton
+                image="/game-assets/buildings/house1.png"
+                title={t("house")}
+                description={t("houseDesc")}
+                cost={BUILD_COST.house}
+                onClick={() => onBuild("house")}
+              />
+              <CommandButton
+                image="/game-assets/buildings/tower.png"
+                title={t("tower")}
+                description={t("towerDesc")}
+                cost={BUILD_COST.tower}
+                onClick={() => onBuild("tower")}
+              />
+            </>
+          ) : (
+            <p className="command-description">
+              {t("commandControl")}
+              <br />
+              {unique
+                .map((kind) => descriptionKey(kind))
+                .filter(Boolean)
+                .map((key) => t(key!))
+                .join(" ")}
+            </p>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="empty-command">
+      <img src="/game-assets/ui/cursor.png" alt="" />
+      <span>
+        <strong>{t("command")}</strong>
+        <small>{t("selectPrompt")}</small>
+      </span>
+    </div>
+  );
+}
+
+function GameScene({
+  locale,
+  settings,
+  resumeSaved,
+  onExit,
+  onOutcome,
+  onSaveAvailable,
+}: {
+  locale: Locale;
+  settings: Settings;
+  resumeSaved: boolean;
+  onExit: () => void;
+  onOutcome: (outcome: "victory" | "defeat") => void;
+  onSaveAvailable: () => void;
+}) {
+  const t = translator(locale);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stateRef = useRef<GameState>(
+    resumeSaved
+      ? restoreGame(
+          typeof window === "undefined" ? null : localStorage.getItem(SAVE_KEY),
+          settings.tutorial,
+        ) ?? createInitialGame(settings.tutorial)
+      : createInitialGame(settings.tutorial),
+  );
+  const imagesRef = useRef<ImageBank | null>(null);
+  const pausedRef = useRef(false);
+  const outcomeSent = useRef(false);
+  const dragRef = useRef({
+    active: false,
+    startX: 0,
+    startY: 0,
+    x: 0,
+    y: 0,
+    additive: false,
+  });
+  const [ready, setReady] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [hover, setHover] = useState<{
+    target: HoverTarget;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [hud, setHud] = useState(() => makeSnapshot(stateRef.current));
+
+  const refreshHud = useCallback(() => {
+    setHud(makeSnapshot(stateRef.current));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    loadGameImages()
+      .then((images) => {
+        if (!active) return;
+        imagesRef.current = images;
+        setReady(true);
+      })
+      .catch(() => {
+        if (active) setReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !imagesRef.current || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let active = true;
+    let frame = 0;
+    let last = performance.now();
+    let hudClock = 0;
+    let saveClock = 0;
+
+    const loop = (now: number) => {
+      if (!active) return;
+      const dt = Math.min(0.034, (now - last) / 1000);
+      last = now;
+      if (!pausedRef.current) updateGame(stateRef.current, dt);
+      renderGame(ctx, imagesRef.current!, stateRef.current, dragRef.current);
+
+      hudClock += dt;
+      saveClock += dt;
+      if (hudClock > 0.12) {
+        hudClock = 0;
+        refreshHud();
+      }
+      if (saveClock > 5 && stateRef.current.outcome === "playing") {
+        saveClock = 0;
+        localStorage.setItem(SAVE_KEY, serializeGame(stateRef.current));
+        onSaveAvailable();
+      }
+      if (
+        stateRef.current.outcome !== "playing" &&
+        !outcomeSent.current
+      ) {
+        outcomeSent.current = true;
+        localStorage.removeItem(SAVE_KEY);
+        onOutcome(stateRef.current.outcome);
+      }
+      frame = requestAnimationFrame(loop);
+    };
+    frame = requestAnimationFrame(loop);
+
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+    };
+  }, [onOutcome, onSaveAvailable, ready, refreshHud]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const pointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || pausedRef.current) return;
+      const point = worldPoint(canvas, event.clientX, event.clientY);
+      if (stateRef.current.buildMode) {
+        placeBuilding(stateRef.current, point.x, point.y);
+        refreshHud();
+        return;
+      }
+      dragRef.current = {
+        active: true,
+        startX: point.x,
+        startY: point.y,
+        x: point.x,
+        y: point.y,
+        additive: event.shiftKey,
+      };
+      canvas.setPointerCapture(event.pointerId);
+    };
+
+    const pointerMove = (event: PointerEvent) => {
+      const point = worldPoint(canvas, event.clientX, event.clientY);
+      if (dragRef.current.active) {
+        dragRef.current.x = point.x;
+        dragRef.current.y = point.y;
+      }
+      if (stateRef.current.buildMode) {
+        setBuildHover(stateRef.current, point.x, point.y);
+      }
+      if (settings.tooltips && !dragRef.current.active) {
+        const target = getHoverTarget(stateRef.current, point.x, point.y);
+        setHover(target ? { target, x: point.screenX, y: point.screenY } : null);
+      } else {
+        setHover(null);
+      }
+    };
+
+    const pointerUp = (event: PointerEvent) => {
+      if (!dragRef.current.active) return;
+      const point = worldPoint(canvas, event.clientX, event.clientY);
+      const drag = dragRef.current;
+      const moved = Math.hypot(point.x - drag.startX, point.y - drag.startY);
+      if (moved > 12) {
+        selectArea(
+          stateRef.current,
+          drag.startX,
+          drag.startY,
+          point.x,
+          point.y,
+          drag.additive,
+        );
+      } else {
+        selectPoint(
+          stateRef.current,
+          point.x,
+          point.y,
+          drag.additive,
+        );
+      }
+      dragRef.current.active = false;
+      refreshHud();
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+    };
+
+    const contextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      if (pausedRef.current) return;
+      const point = worldPoint(canvas, event.clientX, event.clientY);
+      issueCommand(stateRef.current, point.x, point.y);
+      refreshHud();
+    };
+
+    canvas.addEventListener("pointerdown", pointerDown);
+    canvas.addEventListener("pointermove", pointerMove);
+    canvas.addEventListener("pointerup", pointerUp);
+    canvas.addEventListener("contextmenu", contextMenu);
+    return () => {
+      canvas.removeEventListener("pointerdown", pointerDown);
+      canvas.removeEventListener("pointermove", pointerMove);
+      canvas.removeEventListener("pointerup", pointerUp);
+      canvas.removeEventListener("contextmenu", contextMenu);
+    };
+  }, [refreshHud, settings.tooltips]);
+
+  useEffect(() => {
+    const keyDown = (event: KeyboardEvent) => {
+      if (event.code === "Digit1") {
+        stateRef.current.selectedBuildingId = undefined;
+        stateRef.current.selectedUnitIds = stateRef.current.units
+          .filter((unit) => unit.team === "player" && unit.kind === "pawn")
+          .map((unit) => unit.id);
+        if (stateRef.current.tutorialStep === 0) {
+          stateRef.current.tutorialStep = 1;
+        }
+        refreshHud();
+      }
+      if (event.code === "Digit2") {
+        stateRef.current.selectedBuildingId = undefined;
+        stateRef.current.selectedUnitIds = stateRef.current.units
+          .filter((unit) => unit.team === "player" && unit.kind !== "pawn")
+          .map((unit) => unit.id);
+        refreshHud();
+      }
+      if (event.code === "KeyC") {
+        const castle = stateRef.current.buildings.find(
+          (building) => building.kind === "castle" && building.hp > 0,
+        );
+        stateRef.current.selectedUnitIds = [];
+        stateRef.current.selectedBuildingId = castle?.id;
+        refreshHud();
+      }
+      if (event.code === "Space") {
+        event.preventDefault();
+        pausedRef.current = !pausedRef.current;
+        setPaused(pausedRef.current);
+      }
+      if (event.code === "Escape") {
+        if (stateRef.current.buildMode) {
+          cancelBuild(stateRef.current);
+          refreshHud();
+        } else {
+          pausedRef.current = !pausedRef.current;
+          setPaused(pausedRef.current);
+        }
+      }
+    };
+    window.addEventListener("keydown", keyDown);
+    return () => window.removeEventListener("keydown", keyDown);
+  }, [refreshHud]);
+
+  const handlePause = () => {
+    pausedRef.current = !pausedRef.current;
+    setPaused(pausedRef.current);
+  };
+  const handleTrain = (kind: PlayerUnitKind) => {
+    trainUnit(stateRef.current, kind);
+    refreshHud();
+  };
+  const handleBuild = (kind: "house" | "tower") => {
+    beginBuild(stateRef.current, kind);
+    refreshHud();
+  };
+  const skipTutorial = () => {
+    stateRef.current.tutorialStep = 6;
+    stateRef.current.tutorialEnabled = false;
+    refreshHud();
+  };
+
+  const waveLabel =
+    hud.wave >= hud.totalWaves
+      ? t("finalWave")
+      : hud.waveActive
+        ? `${t("wave")} ${hud.wave}/${hud.totalWaves}`
+        : `${t("preparing")} · ${Math.max(0, Math.ceil(hud.waveClock))}s`;
+
+  return (
+    <main className={`game-screen ${settings.largeUi ? "large-ui" : ""}`}>
+      <header className="game-top-hud wood-panel">
+        <div className="resource-strip">
+          <ResourceHud kind="wood" value={hud.resources.wood} label={t("wood")} />
+          <ResourceHud kind="gold" value={hud.resources.gold} label={t("gold")} />
+          <ResourceHud kind="meat" value={hud.resources.meat} label={t("meat")} />
+          <div className="resource-hud population-hud" data-tip={t("population")}>
+            <SpritePreview src="/game-assets/units/pawn-idle.png" />
+            <span>
+              <small>{t("population")}</small>
+              <strong>
+                {hud.population}/{hud.populationCap}
+              </strong>
+            </span>
+          </div>
+        </div>
+
+        <div className="wave-status">
+          <small>{t("missionName")}</small>
+          <strong>{waveLabel}</strong>
+          <span>
+            {t("enemiesLeft")}: {hud.enemies}
+          </span>
+        </div>
+
+        <div className="hud-actions">
+          <button onClick={handlePause} data-tip={t("pause")} aria-label={t("pause")}>
+            {paused ? "▶" : "Ⅱ"}
+          </button>
+          <button
+            onClick={() => {
+              pausedRef.current = true;
+              setPaused(true);
+            }}
+            data-tip={t("mainMenu")}
+            aria-label={t("mainMenu")}
+          >
+            ☰
+          </button>
+        </div>
+      </header>
+
+      <section className="battlefield-shell">
+        <canvas
+          ref={canvasRef}
+          className="battlefield"
+          width={WORLD_W}
+          height={WORLD_H}
+          aria-label="The Verdant Reach realtime strategy battlefield"
+        />
+
+        <div className="castle-vitals paper-chip">
+          <img src="/game-assets/buildings/castle.png" alt="" />
+          <span>
+            <small>Castle</small>
+            <i>
+              <b
+                style={{
+                  width: `${Math.max(
+                    0,
+                    (hud.castleHp / hud.castleMaxHp) * 100,
+                  )}%`,
+                }}
+              />
+            </i>
+            <strong>
+              {hud.castleHp}/{hud.castleMaxHp}
+            </strong>
+          </span>
+        </div>
+
+        <div className="objective-scroll paper-chip">
+          <strong>{t("objective")}</strong>
+          <span>{t("objectiveText")}</span>
+        </div>
+
+        {hud.tutorialEnabled && hud.tutorialStep <= 6 && (
+          <div className="tutorial-scroll paper-panel">
+            <span className="tutorial-number">
+              {hud.tutorialStep < 6 ? hud.tutorialStep + 1 : "✓"}
+            </span>
+            <div>
+              <small>{t("firstSteps")}</small>
+              <strong>
+                {t(
+                  (hud.tutorialStep < 6
+                    ? `tutorial${hud.tutorialStep}`
+                    : "tutorialDone") as CopyKey,
+                )}
+              </strong>
+              {hud.tutorialStep < 6 && (
+                <button onClick={skipTutorial}>{t("skipTutorial")}</button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {hud.buildMode && (
+          <div className="build-mode-ribbon">
+            <strong>
+              {t("build")}: {t(hud.buildMode)}
+            </strong>
+            <span>{t("buildMode")}</span>
+            <button
+              onClick={() => {
+                cancelBuild(stateRef.current);
+                refreshHud();
+              }}
+            >
+              {t("cancel")} · Esc
+            </button>
+          </div>
+        )}
+
+        {hover && (
+          <div
+            className="world-tooltip paper-panel"
+            style={{
+              left: Math.min(hover.x + 18, 980),
+              top: Math.max(16, hover.y - 24),
+            }}
+          >
+            <strong>{t(nameKey(hover.target.kind))}</strong>
+            {descriptionKey(hover.target.kind) && (
+              <span>{t(descriptionKey(hover.target.kind)!)}</span>
+            )}
+            {hover.target.hp !== undefined && (
+              <small>
+                {t("health")}: {hover.target.hp}/{hover.target.maxHp}
+              </small>
+            )}
+            {hover.target.amount !== undefined && (
+              <small>
+                {t("resourceRemaining")}: {hover.target.amount}
+              </small>
+            )}
+          </div>
+        )}
+
+        {hud.notice && (
+          <div className="game-notice">{t(hud.notice as CopyKey)}</div>
+        )}
+
+        {!ready && <div className="loading-cover">{t("loading")}</div>}
+
+        {paused && (
+          <div className="pause-cover">
+            <section className="paper-panel pause-panel">
+              <RibbonTitle size="small">{t("paused")}</RibbonTitle>
+              <PaperButton
+                tone="red"
+                onClick={() => {
+                  pausedRef.current = false;
+                  setPaused(false);
+                }}
+              >
+                {t("resume")}
+              </PaperButton>
+              <PaperButton
+                onClick={() => {
+                  stateRef.current = createInitialGame(settings.tutorial);
+                  outcomeSent.current = false;
+                  pausedRef.current = false;
+                  setPaused(false);
+                  refreshHud();
+                }}
+              >
+                {t("restart")}
+              </PaperButton>
+              <PaperButton tone="plain" onClick={onExit}>
+                {t("mainMenu")}
+              </PaperButton>
+            </section>
+          </div>
+        )}
+      </section>
+
+      <footer className="command-deck wood-panel">
+        <CommandDeck
+          state={hud}
+          t={t}
+          onTrain={handleTrain}
+          onBuild={handleBuild}
+        />
+        <div className="control-hints">
+          <span>
+            <i className="mouse-icon left-click" /> {t("selectControl")}
+          </span>
+          <span>
+            <i className="mouse-icon right-click" /> {t("commandControl")}
+          </span>
+          <span>Space · {t("pause")}</span>
+          <span>1 · Pawn &nbsp; 2 · Army &nbsp; C · Castle</span>
+        </div>
+      </footer>
+    </main>
+  );
+}
+
+function ResultScreen({
+  locale,
+  outcome,
+  onRestart,
+  onMenu,
+}: {
+  locale: Locale;
+  outcome: "victory" | "defeat";
+  onRestart: () => void;
+  onMenu: () => void;
+}) {
+  const t = translator(locale);
+  return (
+    <main className={`storybook-screen result-screen ${outcome}`}>
+      <MenuWorld />
+      <div className="screen-vignette" />
+      <section className="paper-panel result-panel">
+        <SpritePreview
+          className="result-hero"
+          src={
+            outcome === "victory"
+              ? "/game-assets/units/warrior-idle.png"
+              : "/game-assets/enemies/minotaur-idle.png"
+          }
+        />
+        <RibbonTitle>
+          {outcome === "victory" ? t("victory") : t("defeat")}
+        </RibbonTitle>
+        <p>{outcome === "victory" ? t("victoryText") : t("defeatText")}</p>
+        <PaperButton tone="red" onClick={onRestart}>
+          {t("restart")}
+        </PaperButton>
+        <PaperButton onClick={onMenu}>{t("mainMenu")}</PaperButton>
+      </section>
+    </main>
+  );
+}
+
+export default function GameApp() {
+  const [locale, setLocaleState] = useState<Locale | null>(null);
+  const [screen, setScreen] = useState<Screen>("language");
+  const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS);
+  const [hasSave, setHasSave] = useState(false);
+  const [resumeSaved, setResumeSaved] = useState(false);
+  const [runId, setRunId] = useState(0);
+
+  useEffect(() => {
+    const storedLocale = localStorage.getItem(LOCALE_KEY);
+    if (storedLocale === "vi" || storedLocale === "en") {
+      setLocaleState(storedLocale);
+      document.documentElement.lang = storedLocale;
+      setScreen("menu");
+    }
+    const storedSettings = localStorage.getItem(SETTINGS_KEY);
+    if (storedSettings) {
+      try {
+        setSettingsState({ ...DEFAULT_SETTINGS, ...JSON.parse(storedSettings) });
+      } catch {
+        setSettingsState(DEFAULT_SETTINGS);
+      }
+    }
+    setHasSave(Boolean(localStorage.getItem(SAVE_KEY)));
+  }, []);
+
+  const setLocale = useCallback((next: Locale) => {
+    localStorage.setItem(LOCALE_KEY, next);
+    document.documentElement.lang = next;
+    setLocaleState(next);
+    setScreen("menu");
+  }, []);
+
+  const setSettings = useCallback((next: Settings) => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    setSettingsState(next);
+  }, []);
+
+  const newGame = useCallback(() => {
+    localStorage.removeItem(SAVE_KEY);
+    setHasSave(false);
+    setResumeSaved(false);
+    setRunId((id) => id + 1);
+    setScreen("game");
+  }, []);
+
+  const continueGame = useCallback(() => {
+    if (!localStorage.getItem(SAVE_KEY)) return;
+    setResumeSaved(true);
+    setRunId((id) => id + 1);
+    setScreen("game");
+  }, []);
+
+  if (!locale || screen === "language") {
+    return <LanguageScreen onChoose={setLocale} />;
+  }
+
+  if (screen === "how") {
+    return <HowScreen locale={locale} onBack={() => setScreen("menu")} />;
+  }
+  if (screen === "settings") {
+    return (
+      <SettingsScreen
+        locale={locale}
+        settings={settings}
+        onSettings={setSettings}
+        onLocale={setLocale}
+        onBack={() => setScreen("menu")}
+      />
+    );
+  }
+  if (screen === "credits") {
+    return <CreditsScreen locale={locale} onBack={() => setScreen("menu")} />;
+  }
+  if (screen === "game") {
+    return (
+      <GameScene
+        key={runId}
+        locale={locale}
+        settings={settings}
+        resumeSaved={resumeSaved}
+        onExit={() => {
+          setHasSave(Boolean(localStorage.getItem(SAVE_KEY)));
+          setScreen("menu");
+        }}
+        onOutcome={(outcome) => {
+          setHasSave(false);
+          setScreen(outcome);
+        }}
+        onSaveAvailable={() => setHasSave(true)}
+      />
+    );
+  }
+  if (screen === "victory" || screen === "defeat") {
+    return (
+      <ResultScreen
+        locale={locale}
+        outcome={screen}
+        onRestart={newGame}
+        onMenu={() => setScreen("menu")}
+      />
+    );
+  }
+
+  return (
+    <MenuScreen
+      locale={locale}
+      hasSave={hasSave}
+      onNavigate={setScreen}
+      onNewGame={newGame}
+      onContinue={continueGame}
+      onLocale={setLocale}
+    />
+  );
+}
