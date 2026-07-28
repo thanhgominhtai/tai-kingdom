@@ -28,7 +28,11 @@ export type PlayerBuildingKind =
   | "archery"
   | "monastery"
   | "tower";
-export type EnemyBuildingKind = "cave" | "goblinHouse" | "goblinTower";
+export type EnemyBuildingKind =
+  | "cave"
+  | "goblinHouse"
+  | "goblinTower"
+  | "rootTree";
 export type BuildingKind = PlayerBuildingKind | EnemyBuildingKind;
 export type UnitAction =
   | "idle"
@@ -144,7 +148,7 @@ export type NoticeKey =
   | null;
 
 export interface GameState {
-  version: 5;
+  version: 6;
   mode: GameMode;
   level: number;
   time: number;
@@ -211,6 +215,7 @@ interface BuildingSpec {
   asset: AssetKey;
   scale: number;
   frame?: number;
+  frameHeight?: number;
 }
 
 type TerrainKind =
@@ -221,6 +226,7 @@ type TerrainKind =
   | "road"
   | "bridge"
   | "hill"
+  | "cliff"
   | "stair";
 
 interface CellRect {
@@ -246,7 +252,7 @@ interface MapLayout {
 }
 
 interface CampLayout {
-  kind: Extract<BuildingKind, "cave" | "goblinHouse" | "goblinTower">;
+  kind: EnemyBuildingKind;
   x: number;
   y: number;
 }
@@ -276,7 +282,14 @@ export const BUILDING_SPEC: Record<BuildingKind, BuildingSpec> = {
   tower: { hp: 800, asset: "tower", scale: 0.73 },
   cave: { hp: 1500, asset: "cave", scale: 0.96, frame: 192 },
   goblinHouse: { hp: 620, asset: "goblinHouse", scale: 0.68 },
-  goblinTower: { hp: 760, asset: "goblinTower", scale: 0.61 },
+  goblinTower: {
+    hp: 760,
+    asset: "goblinTower",
+    scale: 0.61,
+    frame: 256,
+    frameHeight: 192,
+  },
+  rootTree: { hp: 1750, asset: "deadTree", scale: 0.76 },
 };
 
 export const UNIT_COST: Record<
@@ -347,8 +360,8 @@ const MAP_LAYOUTS: Record<number, MapLayout> = {
       { c1: 7, r1: 14, c2: 12, r2: 15 },
     ],
     stairs: [
-      { c1: 12, r1: 5, c2: 12, r2: 7 },
-      { c1: 32, r1: 20, c2: 32, r2: 22 },
+      { c1: 12, r1: 5, c2: 12, r2: 8 },
+      { c1: 32, r1: 20, c2: 32, r2: 23 },
     ],
     palette: "spring",
   },
@@ -426,30 +439,30 @@ const MAP_LAYOUTS: Record<number, MapLayout> = {
 
 const STAGE_CAMPS: Record<number, CampLayout[]> = {
   1: [
-    { kind: "cave", x: 2630, y: 350 },
-    { kind: "goblinHouse", x: 2410, y: 1010 },
-    { kind: "goblinTower", x: 2730, y: 1590 },
+    { kind: "cave", x: 1880, y: 340 },
+    { kind: "goblinHouse", x: 2700, y: 900 },
+    { kind: "goblinTower", x: 2260, y: 1720 },
   ],
   2: [
-    { kind: "cave", x: 2670, y: 380 },
-    { kind: "goblinHouse", x: 2220, y: 690 },
-    { kind: "goblinTower", x: 2750, y: 1240 },
-    { kind: "cave", x: 2220, y: 1740 },
+    { kind: "cave", x: 1640, y: 350 },
+    { kind: "goblinHouse", x: 2660, y: 480 },
+    { kind: "goblinTower", x: 1740, y: 1740 },
+    { kind: "rootTree", x: 2740, y: 1710 },
   ],
   3: [
-    { kind: "cave", x: 2720, y: 350 },
-    { kind: "goblinHouse", x: 1970, y: 430 },
-    { kind: "goblinTower", x: 2740, y: 980 },
-    { kind: "cave", x: 2020, y: 1450 },
-    { kind: "goblinHouse", x: 2620, y: 1730 },
+    { kind: "cave", x: 1640, y: 340 },
+    { kind: "goblinHouse", x: 2720, y: 330 },
+    { kind: "goblinTower", x: 1940, y: 980 },
+    { kind: "rootTree", x: 2720, y: 1480 },
+    { kind: "cave", x: 1660, y: 1760 },
   ],
   4: [
-    { kind: "cave", x: 2700, y: 390 },
-    { kind: "goblinHouse", x: 2000, y: 420 },
-    { kind: "goblinTower", x: 2480, y: 820 },
-    { kind: "cave", x: 2820, y: 1120 },
-    { kind: "goblinHouse", x: 2070, y: 1510 },
-    { kind: "goblinTower", x: 2640, y: 1740 },
+    { kind: "cave", x: 1680, y: 340 },
+    { kind: "goblinHouse", x: 2700, y: 390 },
+    { kind: "goblinTower", x: 1730, y: 1070 },
+    { kind: "rootTree", x: 2730, y: 1080 },
+    { kind: "cave", x: 1680, y: 1740 },
+    { kind: "goblinHouse", x: 2700, y: 1730 },
   ],
 };
 
@@ -548,6 +561,17 @@ function terrainAtCell(c: number, r: number, level = 1): TerrainKind {
             (r >= 26 && c >= 20 && c <= 30);
   if (water) return "water";
   if (layout.hills.some((rect) => inside(c, r, rect))) return "hill";
+  if (
+    layout.hills.some(
+      (rect) =>
+        c >= rect.c &&
+        c < rect.c + rect.w &&
+        r >= rect.r + rect.h &&
+        r < rect.r + rect.h + 2,
+    )
+  ) {
+    return "cliff";
+  }
   if (layout.roads.some((rect) => inRange(c, r, rect))) return "road";
   if (layout.palette === "autumn" || (layout.palette === "coast" && c > 26)) return "autumn";
   if (layout.palette === "deep" || r < 9 || (c > 26 && r > 17)) return "deep";
@@ -588,6 +612,17 @@ function endlessTerrainAtCell(state: GameState, c: number, r: number): TerrainKi
           : localC >= 2 && localC <= 4 && r >= 23 && r <= 26;
   if (inlet) return "water";
   if (layout.hills.some((rect) => inside(localC, r, rect))) return "hill";
+  if (
+    layout.hills.some(
+      (rect) =>
+        localC >= rect.c &&
+        localC < rect.c + rect.w &&
+        r >= rect.r + rect.h &&
+        r < rect.r + rect.h + 2,
+    )
+  ) {
+    return "cliff";
+  }
   if (layout.roads.some((rect) => inRange(localC, r, rect))) return "road";
   if (layout.palette === "autumn" || (layout.palette === "coast" && r > 16)) return "autumn";
   if (layout.palette === "deep" || r < 9) return "deep";
@@ -603,13 +638,29 @@ function stateTerrainAtCell(state: GameState, c: number, r: number) {
 function cellWalkable(c: number, r: number, level = 1) {
   if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
   const kind = terrainAtCell(c, r, level);
-  return kind !== "water" && kind !== "hill";
+  return kind !== "water" && kind !== "cliff";
 }
 
 function stateCellWalkable(state: GameState, c: number, r: number) {
   if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
   const kind = stateTerrainAtCell(state, c, r);
-  return kind !== "water" && kind !== "hill";
+  return kind !== "water" && kind !== "cliff";
+}
+
+function terrainTransitionAllowed(
+  state: GameState,
+  fromC: number,
+  fromR: number,
+  toC: number,
+  toR: number,
+) {
+  const from = stateTerrainAtCell(state, fromC, fromR);
+  const to = stateTerrainAtCell(state, toC, toR);
+  if (from === "water" || from === "cliff" || to === "water" || to === "cliff") {
+    return false;
+  }
+  if (from === "stair" || to === "stair") return true;
+  return (from === "hill") === (to === "hill");
 }
 
 export function isWalkable(x: number, y: number, padding = 18, level = 1) {
@@ -633,8 +684,10 @@ function stateIsWalkable(state: GameState, x: number, y: number, padding = 18) {
     [x - padding, y + padding],
     [x + padding, y + padding],
   ];
-  return samples.every(([sx, sy]) =>
-    stateCellWalkable(state, Math.floor(sx / TILE), Math.floor(sy / TILE)),
+  return samples.every(
+    ([sx, sy]) =>
+      stateCellWalkable(state, Math.floor(sx / TILE), Math.floor(sy / TILE)) &&
+      !pointBlockedByDecor(state, sx, sy),
   );
 }
 
@@ -657,6 +710,93 @@ function nearestStateWalkablePoint(
     }
   }
   return null;
+}
+
+function buildingPointAllowed(
+  state: GameState,
+  building: Building,
+  x: number,
+  y: number,
+) {
+  if (!stateIsWalkable(state, x, y, 42)) return false;
+  if (stateTerrainAtCell(state, Math.floor(x / TILE), Math.floor(y / TILE)) === "bridge") {
+    return false;
+  }
+  return !state.buildings.some((other) => {
+    if (other.id === building.id || other.hp <= 0) return false;
+    const enemyPair = building.team === "enemy" && other.team === "enemy";
+    const mixedTeams = building.team !== other.team;
+    const buffer = mixedTeams ? 470 : enemyPair ? 330 : 145;
+    return distance(x, y, other.x, other.y) < buffer;
+  });
+}
+
+function nearestBuildingPoint(state: GameState, building: Building) {
+  const baseC = Math.floor(building.x / TILE);
+  const baseR = Math.floor(building.y / TILE);
+  for (let radius = 0; radius < 18; radius += 1) {
+    for (let r = baseR - radius; r <= baseR + radius; r += 1) {
+      for (let c = baseC - radius; c <= baseC + radius; c += 1) {
+        if (
+          radius > 0 &&
+          Math.abs(c - baseC) !== radius &&
+          Math.abs(r - baseR) !== radius
+        ) {
+          continue;
+        }
+        const candidate = { x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 };
+        if (buildingPointAllowed(state, building, candidate.x, candidate.y)) return candidate;
+      }
+    }
+  }
+  return nearestStateWalkablePoint(state, building.x, building.y, 42);
+}
+
+function resourcePointAllowed(
+  state: GameState,
+  node: ResourceNode,
+  x: number,
+  y: number,
+) {
+  if (!stateIsWalkable(state, x, y, node.kind === "wood" ? 30 : 22)) return false;
+  if (stateTerrainAtCell(state, Math.floor(x / TILE), Math.floor(y / TILE)) === "bridge") {
+    return false;
+  }
+  if (
+    state.buildings.some((building) => {
+      if (building.hp <= 0) return false;
+      const buffer = building.team === "enemy" ? 220 : 125;
+      return distance(x, y, building.x, building.y) < buffer;
+    })
+  ) {
+    return false;
+  }
+  return !state.nodes.some((other) => {
+    if (other.id === node.id || other.amount <= 0) return false;
+    const buffer = node.kind === "wood" || other.kind === "wood" ? 82 : 64;
+    return distance(x, y, other.x, other.y) < buffer;
+  });
+}
+
+function nearestResourcePoint(state: GameState, node: ResourceNode) {
+  const baseC = Math.floor(node.x / TILE);
+  const baseR = Math.floor(node.y / TILE);
+  for (let radius = 0; radius < 18; radius += 1) {
+    for (let r = baseR - radius; r <= baseR + radius; r += 1) {
+      for (let c = baseC - radius; c <= baseC + radius; c += 1) {
+        if (
+          radius > 0 &&
+          Math.abs(c - baseC) !== radius &&
+          Math.abs(r - baseR) !== radius
+        ) {
+          continue;
+        }
+        const candidate = { x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 };
+        if (resourcePointAllowed(state, node, candidate.x, candidate.y)) return candidate;
+      }
+    }
+  }
+  return nearestStateWalkablePoint(state, node.x, node.y, node.kind === "wood" ? 30 : 22);
 }
 
 function nearestWalkablePoint(
@@ -739,9 +879,14 @@ function pathCellWalkable(
   const blockedByBuilding = state.buildings.some((building) => {
     if (building.hp <= 0) return false;
     const size = getBuildingSize(building.kind);
-    return distance(x, y, building.x, building.y) < Math.min(82, Math.max(48, size.w * 0.3));
+    const radius =
+      building.team === "enemy"
+        ? Math.min(112, Math.max(70, size.w * 0.34))
+        : Math.min(82, Math.max(48, size.w * 0.3));
+    return distance(x, y, building.x, building.y) < radius;
   });
   if (blockedByBuilding) return false;
+  if (pointBlockedByDecor(state, x, y)) return false;
   return !state.nodes.some(
     (node) =>
       node.amount > 0 &&
@@ -855,11 +1000,14 @@ function findPath(
       const nc = cc + dc;
       const nr = cr + dr;
       if (!pathCellWalkable(state, nc, nr, targetX, targetY)) continue;
+      if (!terrainTransitionAllowed(state, cc, cr, nc, nr)) continue;
       if (
         dc &&
         dr &&
         (!pathCellWalkable(state, cc + dc, cr, targetX, targetY) ||
-          !pathCellWalkable(state, cc, cr + dr, targetX, targetY))
+          !pathCellWalkable(state, cc, cr + dr, targetX, targetY) ||
+          !terrainTransitionAllowed(state, cc, cr, cc + dc, cr) ||
+          !terrainTransitionAllowed(state, cc, cr, cc, cr + dr))
       ) {
         continue;
       }
@@ -990,18 +1138,26 @@ function stageResourceLayout(level: number) {
     ["wood", 2230, 1280, 3],
     ["wood", 1760, 1760, 0],
     ["wood", 1890, 1830, 2],
+    ["wood", 330, 430, 3],
+    ["wood", 760, 470, 0],
+    ["wood", 1480, 820, 2],
     ["gold", 1180, 1820, 0],
     ["gold", 1320, 1800, 1],
     ["gold", 490, 760, 2],
     ["gold", 1780, 990, 3],
     ["gold", 2310, 720, 4],
     ["gold", 2380, 1770, 5],
+    ["gold", 820, 360, 1],
+    ["gold", 2860, 1160, 5],
     ["meat", 960, 1810, 0],
     ["meat", 1050, 1740, 1],
     ["meat", 350, 1180, 2],
     ["meat", 1830, 1360, 3],
     ["meat", 2100, 810, 0],
     ["meat", 2440, 1370, 1],
+    ["meat", 980, 620, 2],
+    ["meat", 1540, 430, 3],
+    ["meat", 2850, 1500, 0],
   ];
   const shifts = [
     { x: 0, y: 0 },
@@ -1036,7 +1192,12 @@ function addEndlessRegionContent(state: GameState, region: number, initial = fal
     { x: 555, y: 1740 },
   ];
   const count = Math.min(campSlots.length, 3 + region);
-  const campKinds: CampLayout["kind"][] = ["cave", "goblinHouse", "goblinTower"];
+  const campKinds: CampLayout["kind"][] = [
+    "cave",
+    "goblinHouse",
+    "goblinTower",
+    "rootTree",
+  ];
   for (let index = 0; index < count; index += 1) {
     const slot = campSlots[(index + region) % campSlots.length];
     const camp = createBuilding(
@@ -1047,7 +1208,7 @@ function addEndlessRegionContent(state: GameState, region: number, initial = fal
       slot.y,
       region,
     );
-    const safe = nearestStateWalkablePoint(state, camp.x, camp.y, 46);
+    const safe = nearestBuildingPoint(state, camp);
     if (safe) {
       camp.x = safe.x;
       camp.y = safe.y;
@@ -1075,7 +1236,7 @@ function addEndlessRegionContent(state: GameState, region: number, initial = fal
       kind === "gold" ? 120 + region * 12 : kind === "meat" ? 86 + region * 8 : 145,
       variant,
     );
-    const safe = nearestStateWalkablePoint(state, node.x, node.y, 24);
+    const safe = nearestResourcePoint(state, node);
     if (safe) {
       node.x = safe.x;
       node.y = safe.y;
@@ -1109,7 +1270,7 @@ export function createInitialGame(
 ): GameState {
   level = Math.max(1, Math.min(MAP_COUNT, level));
   const state: GameState = {
-    version: 5,
+    version: 6,
     mode,
     level,
     time: 0,
@@ -1213,7 +1374,7 @@ export function createInitialGame(
     );
   }
   for (const building of state.buildings) {
-    const safe = nearestStateWalkablePoint(state, building.x, building.y, 42);
+    const safe = nearestBuildingPoint(state, building);
     if (safe) {
       building.x = safe.x;
       building.y = safe.y;
@@ -1229,7 +1390,7 @@ export function createInitialGame(
     }
   }
   for (const node of state.nodes) {
-    const safe = nearestStateWalkablePoint(state, node.x, node.y, 24);
+    const safe = nearestResourcePoint(state, node);
     if (safe) {
       node.x = safe.x;
       node.y = safe.y;
@@ -1243,7 +1404,7 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
   try {
     const parsed = JSON.parse(raw) as GameState;
     if (
-      parsed.version !== 5 ||
+      parsed.version !== 6 ||
       !Array.isArray(parsed.units) ||
       !Array.isArray(parsed.buildings) ||
       !parsed.resources
@@ -1312,15 +1473,19 @@ export function getBuildingSize(kind: BuildingKind) {
       ? { w: 320, h: 256 }
       : kind === "monastery"
         ? { w: 192, h: 320 }
+        : kind === "rootTree"
+          ? { w: 384, h: 320 }
         : kind === "cave"
           ? { w: 192, h: 192 }
           : kind === "house"
             ? { w: 128, h: 192 }
             : kind === "tower"
               ? { w: 128, h: 256 }
-              : kind === "goblinHouse"
-                ? { w: 192, h: 192 }
-                : { w: 192, h: 256 };
+      : kind === "goblinHouse"
+        ? { w: 192, h: 192 }
+        : kind === "goblinTower"
+          ? { w: 256, h: 192 }
+        : { w: 192, h: 256 };
   return { w: source.w * spec.scale, h: source.h * spec.scale };
 }
 
@@ -1915,7 +2080,17 @@ function spawnWave(state: GameState) {
     (building) => building.team === "enemy" && building.hp > 0,
   );
   roster.forEach((kind, index) => {
-    const den = activeDens[index % Math.max(1, activeDens.length)];
+    const preferredKinds: EnemyBuildingKind[] =
+      kind === "troll" || kind === "minotaur" || kind === "panda"
+        ? ["rootTree", "cave"]
+        : kind === "goblin" || kind === "thief"
+          ? ["goblinHouse", "goblinTower"]
+          : ["cave", "rootTree"];
+    const preferredDens = activeDens.filter((building) =>
+      preferredKinds.includes(building.kind as EnemyBuildingKind),
+    );
+    const denPool = preferredDens.length ? preferredDens : activeDens;
+    const den = denPool[index % Math.max(1, denPool.length)];
     const fallback = ENEMY_SPAWNS[index % ENEMY_SPAWNS.length];
     const x = (den?.x ?? fallback.x) + (index % 3) * 34 - 34;
     const y = (den?.y ?? fallback.y) + 58 + Math.floor(index / 3) * 30;
@@ -2612,6 +2787,40 @@ export function updateGame(state: GameState, dt: number) {
   }
 }
 
+function drawAtlasSprite(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  frameWidth: number,
+  frameHeight: number,
+  frame: number,
+  x: number,
+  y: number,
+  scale: number,
+  facing: 1 | -1 = 1,
+  alpha = 1,
+) {
+  const frames = Math.max(1, Math.floor(image.width / frameWidth));
+  const sourceFrame = ((frame % frames) + frames) % frames;
+  const width = frameWidth * scale;
+  const height = frameHeight * scale;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.scale(facing, 1);
+  ctx.drawImage(
+    image,
+    sourceFrame * frameWidth,
+    0,
+    frameWidth,
+    frameHeight,
+    -width / 2,
+    -height * 0.78,
+    width,
+    height,
+  );
+  ctx.restore();
+}
+
 function drawSprite(
   ctx: CanvasRenderingContext2D,
   image: HTMLImageElement,
@@ -2623,24 +2832,18 @@ function drawSprite(
   facing: 1 | -1 = 1,
   alpha = 1,
 ) {
-  const frames = Math.max(1, Math.floor(image.width / frameSize));
-  const sourceFrame = ((frame % frames) + frames) % frames;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(x, y);
-  ctx.scale(facing, 1);
-  ctx.drawImage(
+  drawAtlasSprite(
+    ctx,
     image,
-    sourceFrame * frameSize,
-    0,
     frameSize,
     frameSize,
-    (-frameSize * scale) / 2,
-    -frameSize * scale * 0.78,
-    frameSize * scale,
-    frameSize * scale,
+    frame,
+    x,
+    y,
+    scale,
+    facing,
+    alpha,
   );
-  ctx.restore();
 }
 
 function tileAsset(kind: TerrainKind): AssetKey {
@@ -2664,7 +2867,14 @@ function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: Ga
   for (let r = firstR; r <= lastR; r += 1) {
     for (let c = firstC; c <= lastC; c += 1) {
       const kind = stateTerrainAtCell(state, c, r);
-      if (kind === "water" || kind === "bridge" || kind === "hill") continue;
+      if (
+        kind === "water" ||
+        kind === "bridge" ||
+        kind === "hill" ||
+        kind === "cliff"
+      ) {
+        continue;
+      }
       const leftWater = stateTerrainAtCell(state, c - 1, r) === "water";
       const rightWater = stateTerrainAtCell(state, c + 1, r) === "water";
       const topWater = stateTerrainAtCell(state, c, r - 1) === "water";
@@ -2706,15 +2916,21 @@ function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: Ga
           hill.w,
           hill.h,
           state.time,
+          layout.palette,
         );
       }
       for (const stair of layout.stairs) {
-        drawStairs(ctx, images, {
-          c1: stair.c1 + offset,
-          c2: stair.c2 + offset,
-          r1: stair.r1,
-          r2: stair.r2,
-        });
+        drawStairs(
+          ctx,
+          images,
+          {
+            c1: stair.c1 + offset,
+            c2: stair.c2 + offset,
+            r1: stair.r1,
+            r2: stair.r2,
+          },
+          layout.palette,
+        );
       }
       if (region + 1 < state.endlessTier) {
         drawBridgeRect(ctx, images, {
@@ -2729,12 +2945,20 @@ function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: Ga
   } else {
     const layout = mapLayout(state.level);
     for (const hill of layout.hills) {
-      drawElevation(ctx, images, hill.c * TILE, hill.r * TILE, hill.w, hill.h, state.time);
+      drawElevation(
+        ctx,
+        images,
+        hill.c * TILE,
+        hill.r * TILE,
+        hill.w,
+        hill.h,
+        state.time,
+        layout.palette,
+      );
     }
     for (const bridge of layout.bridges) drawBridgeRect(ctx, images, bridge);
-    for (const stair of layout.stairs) drawStairs(ctx, images, stair);
+    for (const stair of layout.stairs) drawStairs(ctx, images, stair, layout.palette);
     drawWorldPaths(ctx, images, state.level);
-    drawFactionZones(ctx);
   }
 }
 
@@ -2763,8 +2987,14 @@ function drawElevation(
   columns: number,
   rows: number,
   time: number,
+  palette: MapLayout["palette"],
 ) {
-  const terrain = images.grassDeep;
+  const terrain =
+    palette === "deep"
+      ? images.grassDeep
+      : palette === "autumn" || palette === "coast"
+        ? images.grassAutumn
+        : images.grassSpring;
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < columns; c += 1) {
       const sx = c === 0 ? 0 : c === columns - 1 ? 128 : 64;
@@ -2783,12 +3013,6 @@ function drawElevation(
   ctx.fillRect(x, y, columns * 64, rows * 64);
 }
 
-function drawBridge(ctx: CanvasRenderingContext2D, images: ImageBank, x: number, y: number, repeats: number) {
-  for (let index = 0; index < repeats; index += 1) {
-    ctx.drawImage(images.bridgeAll, 0, 0, 192, 64, x + index * 192, y + 15, 192, 64);
-  }
-}
-
 function drawBridgeRect(
   ctx: CanvasRenderingContext2D,
   images: ImageBank,
@@ -2797,28 +3021,61 @@ function drawBridgeRect(
   const width = rect.c2 - rect.c1 + 1;
   const height = rect.r2 - rect.r1 + 1;
   if (width >= height) {
-    drawBridge(ctx, images, rect.c1 * TILE, rect.r1 * TILE, Math.max(1, Math.ceil(width / 3)));
+    for (let index = 0; index < width; index += 1) {
+      ctx.drawImage(
+        images.bridgeAll,
+        (index % 3) * TILE,
+        0,
+        TILE,
+        TILE,
+        (rect.c1 + index) * TILE,
+        rect.r1 * TILE,
+        TILE,
+        TILE,
+      );
+    }
     return;
   }
-  ctx.save();
-  ctx.translate((rect.c1 + 1) * TILE, rect.r1 * TILE);
-  ctx.rotate(Math.PI / 2);
-  drawBridge(ctx, images, 0, 0, Math.max(1, Math.ceil(height / 3)));
-  ctx.restore();
+  for (let index = 0; index < height; index += 1) {
+    ctx.drawImage(
+      images.bridgeAll,
+      0,
+      TILE + (index % 3) * TILE,
+      TILE,
+      TILE,
+      rect.c1 * TILE,
+      (rect.r1 + index) * TILE,
+      TILE,
+      TILE,
+    );
+  }
 }
 
-function drawStairs(ctx: CanvasRenderingContext2D, images: ImageBank, rect: RangeRect) {
-  for (let r = rect.r1; r <= rect.r2; r += 1) {
-    for (let c = rect.c1; c <= rect.c2; c += 1) {
-      ctx.save();
-      ctx.drawImage(images.bridgeAll, 64, 0, 64, 64, c * TILE, r * TILE, 64, 64);
-      ctx.fillStyle = "rgba(62, 47, 38, .32)";
-      for (let step = 1; step < 5; step += 1) {
-        ctx.fillRect(c * TILE + 8, r * TILE + step * 12, 48, 3);
-      }
-      ctx.restore();
-    }
-  }
+function drawStairs(
+  ctx: CanvasRenderingContext2D,
+  images: ImageBank,
+  rect: RangeRect,
+  palette: MapLayout["palette"],
+) {
+  const width = (rect.c2 - rect.c1 + 1) * TILE;
+  const height = (rect.r2 - rect.r1 + 1) * TILE;
+  const x = rect.c1 * TILE;
+  const y = rect.r1 * TILE;
+  const terrain =
+    palette === "deep"
+      ? images.grassDeep
+      : palette === "autumn" || palette === "coast"
+        ? images.grassAutumn
+        : images.grassSpring;
+  ctx.save();
+  // The lower-left triangular grass pieces form the ramp shoulders.
+  ctx.drawImage(terrain, 0, 256, 192, 128, x - TILE, y, width + TILE * 2, height);
+  // The narrow strip in Tilemap_Elevation is the actual walkable stair lane.
+  ctx.drawImage(images.elevation, 192, 384, 64, 128, x, y, width, height);
+  ctx.strokeStyle = "rgba(37, 65, 67, .34)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 2, y + 2, width - 4, height - 4);
+  ctx.restore();
 }
 
 function drawWorldPaths(ctx: CanvasRenderingContext2D, images: ImageBank, level: number) {
@@ -2848,32 +3105,6 @@ function drawWorldPaths(ctx: CanvasRenderingContext2D, images: ImageBank, level:
     }
     ctx.restore();
   }
-}
-
-function drawFactionZones(ctx: CanvasRenderingContext2D) {
-  ctx.save();
-  ctx.setLineDash([18, 12]);
-  ctx.lineWidth = 4;
-  ctx.fillStyle = "rgba(73, 152, 180, .075)";
-  ctx.strokeStyle = "rgba(185, 235, 245, .48)";
-  ctx.beginPath();
-  ctx.ellipse(640, 1510, 560, 390, -0.08, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = "rgba(198, 72, 72, .075)";
-  ctx.strokeStyle = "rgba(255, 177, 143, .5)";
-  ctx.beginPath();
-  ctx.ellipse(2600, 940, 430, 710, 0.08, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.font = '900 18px "Segoe UI", sans-serif';
-  ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(225, 248, 248, .68)";
-  ctx.fillText("CROWN TERRITORY", 620, 1210);
-  ctx.fillStyle = "rgba(255, 210, 177, .7)";
-  ctx.fillText("ENEMY FRONT", 2600, 1180);
-  ctx.restore();
 }
 
 function drawHealthBar(
@@ -2939,10 +3170,11 @@ function drawBuilding(
     ctx.stroke();
   }
   if (spec.frame) {
-    drawSprite(
+    drawAtlasSprite(
       ctx,
       image,
       spec.frame,
+      spec.frameHeight ?? spec.frame,
       Math.floor(state.time * 8),
       building.x,
       building.y + 18,
@@ -3086,19 +3318,24 @@ function drawResource(
     const stumpKey = `stump${(node.variant % 4) + 1}` as AssetKey;
     if (node.amount > 0) {
       const image = images[key];
-      const frameSize = node.variant % 4 < 2 ? 256 : 192;
-      const scale = frameSize === 256 ? 0.72 : 0.9;
+      const frameWidth = 192;
+      const frameHeight = image.height;
+      const scale = frameHeight === 256 ? 0.82 : 0.9;
       const faded = unitOverlapsOccluder(
         state,
         node.x,
         node.y,
-        frameSize * scale * 0.36,
-        frameSize * scale * 0.74,
+        frameWidth * scale * 0.42,
+        frameHeight * scale * 0.74,
       );
-      drawSprite(
+      // Tree1/2 use 192x256 cells while Tree3/4 use 192x192 cells.
+      // Keeping width and height separate prevents a frame from borrowing
+      // the left edge of the neighboring tree in the atlas.
+      drawAtlasSprite(
         ctx,
         image,
-        frameSize,
+        frameWidth,
+        frameHeight,
         0,
         node.x,
         node.y,
@@ -3181,39 +3418,317 @@ interface Decor {
   frame?: number;
   frameSize?: number;
   occludes?: boolean;
+  solid?: boolean;
   maps?: number[];
 }
 
-const DECOR: Decor[] = [
-  { key: "rock1", x: 260, y: 410, w: 64, h: 64, maps: [1, 2] },
-  { key: "rock4", x: 830, y: 760, w: 64, h: 64, maps: [1, 4] },
-  { key: "rock3", x: 1400, y: 1060, w: 64, h: 64 },
-  { key: "rock2", x: 2020, y: 1860, w: 64, h: 64 },
-  { key: "bush1", x: 310, y: 920, w: 92, h: 92, frameSize: 128, frame: 1, occludes: true },
-  { key: "bush2", x: 1340, y: 480, w: 92, h: 92, frameSize: 128, frame: 5, occludes: true, maps: [1, 2] },
-  { key: "bush1", x: 2050, y: 880, w: 92, h: 92, frameSize: 128, frame: 3, occludes: true },
-  { key: "bush2", x: 2400, y: 1470, w: 92, h: 92, frameSize: 128, frame: 2, occludes: true },
-  { key: "deadTree", x: 2820, y: 420, w: 250, h: 210, occludes: true, maps: [3, 4] },
-  { key: "bones1", x: 2480, y: 440, w: 64, h: 64, maps: [3, 4] },
+const STAGE_DECOR: Decor[] = [
+  { key: "rock1", x: 270, y: 410, w: 64, h: 64, solid: true, maps: [1, 2] },
+  { key: "rock4", x: 830, y: 760, w: 64, h: 64, solid: true, maps: [1, 4] },
+  { key: "rock3", x: 1400, y: 1060, w: 64, h: 64, solid: true },
+  { key: "rock2", x: 2010, y: 1890, w: 64, h: 64, solid: true },
+  { key: "rock2", x: 720, y: 1240, w: 64, h: 64, solid: true },
+  { key: "rock1", x: 1540, y: 360, w: 64, h: 64, solid: true },
+  { key: "rock4", x: 2240, y: 1020, w: 64, h: 64, solid: true },
+  { key: "rock3", x: 2910, y: 620, w: 64, h: 64, solid: true, maps: [1, 2] },
+  { key: "rock1", x: 1160, y: 1010, w: 64, h: 64, solid: true, maps: [2, 3] },
+  { key: "rock2", x: 1820, y: 1210, w: 64, h: 64, solid: true, maps: [2, 4] },
+  {
+    key: "bush1",
+    x: 310,
+    y: 920,
+    w: 92,
+    h: 92,
+    frameSize: 128,
+    frame: 1,
+    occludes: true,
+  },
+  {
+    key: "bush2",
+    x: 1340,
+    y: 480,
+    w: 92,
+    h: 92,
+    frameSize: 128,
+    frame: 5,
+    occludes: true,
+    maps: [1, 2],
+  },
+  {
+    key: "bush1",
+    x: 2050,
+    y: 880,
+    w: 92,
+    h: 92,
+    frameSize: 128,
+    frame: 3,
+    occludes: true,
+  },
+  {
+    key: "bush2",
+    x: 2390,
+    y: 1470,
+    w: 92,
+    h: 92,
+    frameSize: 128,
+    frame: 2,
+    occludes: true,
+  },
+  {
+    key: "bush2",
+    x: 1010,
+    y: 380,
+    w: 88,
+    h: 88,
+    frameSize: 128,
+    frame: 4,
+    occludes: true,
+  },
+  {
+    key: "bush1",
+    x: 1670,
+    y: 1530,
+    w: 90,
+    h: 90,
+    frameSize: 128,
+    frame: 2,
+    occludes: true,
+  },
+  {
+    key: "bush2",
+    x: 2860,
+    y: 1350,
+    w: 88,
+    h: 88,
+    frameSize: 128,
+    frame: 6,
+    occludes: true,
+  },
+  {
+    key: "bush1",
+    x: 540,
+    y: 610,
+    w: 86,
+    h: 86,
+    frameSize: 128,
+    frame: 7,
+    occludes: true,
+    maps: [1, 3],
+  },
+  {
+    key: "bush2",
+    x: 1910,
+    y: 610,
+    w: 86,
+    h: 86,
+    frameSize: 128,
+    frame: 1,
+    occludes: true,
+    maps: [2, 4],
+  },
+  {
+    key: "deadTree",
+    x: 2820,
+    y: 700,
+    w: 250,
+    h: 210,
+    occludes: true,
+    solid: true,
+    maps: [3, 4],
+  },
+  { key: "bones1", x: 2390, y: 440, w: 64, h: 64, maps: [3, 4] },
   { key: "bones2", x: 2780, y: 690, w: 64, h: 64, maps: [3, 4] },
   { key: "bones3", x: 2630, y: 820, w: 64, h: 64, maps: [3, 4] },
-  { key: "skullSpike1", x: 2460, y: 650, w: 64, h: 128, occludes: true, maps: [3, 4] },
-  { key: "skullSpike2", x: 2860, y: 850, w: 64, h: 128, occludes: true, maps: [3, 4] },
-  { key: "fishHut", x: 2260, y: 350, w: 154, h: 154, frameSize: 192, occludes: true, maps: [4] },
-  { key: "pirateTower", x: 2180, y: 520, w: 112, h: 168, occludes: true, maps: [4] },
-  { key: "cannon", x: 2300, y: 545, w: 64, h: 64, maps: [4] },
-  { key: "rock2", x: 720, y: 1240, w: 64, h: 64 },
-  { key: "bush2", x: 1010, y: 380, w: 88, h: 88, frameSize: 128, frame: 4, occludes: true },
-  { key: "rock1", x: 1540, y: 360, w: 64, h: 64 },
-  { key: "bush1", x: 1670, y: 1530, w: 90, h: 90, frameSize: 128, frame: 2, occludes: true },
-  { key: "rock4", x: 2240, y: 1020, w: 64, h: 64 },
-  { key: "bush2", x: 2840, y: 1350, w: 88, h: 88, frameSize: 128, frame: 6, occludes: true },
+  { key: "bones1", x: 1880, y: 1280, w: 64, h: 64, maps: [3, 4] },
+  { key: "bones2", x: 2310, y: 1580, w: 64, h: 64, maps: [3, 4] },
+  {
+    key: "skullSpike1",
+    x: 2460,
+    y: 650,
+    w: 64,
+    h: 128,
+    occludes: true,
+    solid: true,
+    maps: [3, 4],
+  },
+  {
+    key: "skullSpike2",
+    x: 2860,
+    y: 910,
+    w: 64,
+    h: 128,
+    occludes: true,
+    solid: true,
+    maps: [3, 4],
+  },
+  {
+    key: "fishHut",
+    x: 2230,
+    y: 350,
+    w: 154,
+    h: 154,
+    frameSize: 192,
+    occludes: true,
+    solid: true,
+    maps: [4],
+  },
+  {
+    key: "pirateTower",
+    x: 2160,
+    y: 560,
+    w: 112,
+    h: 168,
+    occludes: true,
+    solid: true,
+    maps: [4],
+  },
+  { key: "cannon", x: 2310, y: 585, w: 64, h: 64, solid: true, maps: [4] },
+  { key: "cannon", x: 2860, y: 1260, w: 64, h: 64, solid: true, maps: [4] },
 ];
 
-function drawFenceLine(ctx: CanvasRenderingContext2D, images: ImageBank, x: number, y: number, count: number) {
-  for (let index = 0; index < count; index += 1) {
-    ctx.drawImage(images.woodenFence, 0, 0, 64, 64, x + index * 58, y, 64, 64);
+const ENDLESS_DECOR_TEMPLATES: Record<number, Decor[]> = {
+  1: [
+    { key: "rock1", x: 105, y: 320, w: 64, h: 64, solid: true },
+    { key: "rock4", x: 675, y: 770, w: 64, h: 64, solid: true },
+    { key: "bush1", x: 115, y: 910, w: 86, h: 86, frameSize: 128, frame: 1 },
+    { key: "bush2", x: 660, y: 1160, w: 86, h: 86, frameSize: 128, frame: 4 },
+    { key: "bones1", x: 320, y: 1010, w: 64, h: 64 },
+  ],
+  2: [
+    { key: "rock2", x: 110, y: 600, w: 64, h: 64, solid: true },
+    { key: "rock3", x: 675, y: 330, w: 64, h: 64, solid: true },
+    { key: "bush2", x: 110, y: 940, w: 88, h: 88, frameSize: 128, frame: 2 },
+    { key: "bush1", x: 670, y: 1490, w: 88, h: 88, frameSize: 128, frame: 6 },
+    { key: "bones2", x: 365, y: 1030, w: 64, h: 64 },
+  ],
+  3: [
+    { key: "deadTree", x: 650, y: 770, w: 205, h: 176, occludes: true, solid: true },
+    { key: "rock4", x: 110, y: 360, w: 64, h: 64, solid: true },
+    { key: "bush1", x: 105, y: 980, w: 86, h: 86, frameSize: 128, frame: 5 },
+    { key: "bones1", x: 320, y: 940, w: 64, h: 64 },
+    { key: "skullSpike1", x: 675, y: 1480, w: 54, h: 108, solid: true },
+  ],
+  4: [
+    { key: "pirateTower", x: 650, y: 500, w: 96, h: 144, occludes: true, solid: true },
+    { key: "cannon", x: 665, y: 650, w: 58, h: 58, solid: true },
+    { key: "rock1", x: 105, y: 380, w: 64, h: 64, solid: true },
+    { key: "bush2", x: 105, y: 980, w: 86, h: 86, frameSize: 128, frame: 3 },
+    { key: "bones3", x: 345, y: 1060, w: 64, h: 64 },
+  ],
+};
+
+function decorBlocksPoint(decor: Decor, x: number, y: number) {
+  if (!decor.solid) return false;
+  const radiusX = Math.max(24, decor.w * 0.3);
+  const radiusY = Math.max(18, decor.h * 0.17);
+  return (
+    Math.abs(x - decor.x) < radiusX &&
+    Math.abs(y - (decor.y - radiusY * 0.35)) < radiusY
+  );
+}
+
+function pointBlockedByDecor(state: GameState, x: number, y: number) {
+  if (state.mode === "stage") {
+    return STAGE_DECOR.some(
+      (decor) =>
+        (!decor.maps || decor.maps.includes(state.level)) &&
+        decorBlocksPoint(decor, x, y),
+    );
   }
+  const region = Math.floor(x / (ENDLESS_REGION_WIDTH * TILE));
+  if (region < 0 || region >= state.endlessTier) return false;
+  const localX = x - region * ENDLESS_REGION_WIDTH * TILE;
+  const mapId = endlessRegionMap(state, region);
+  return ENDLESS_DECOR_TEMPLATES[mapId].some((decor) =>
+    decorBlocksPoint(decor, localX, y),
+  );
+}
+
+function drawFenceTile(
+  ctx: CanvasRenderingContext2D,
+  images: ImageBank,
+  sourceX: number,
+  sourceY: number,
+  x: number,
+  y: number,
+) {
+  ctx.drawImage(images.woodenFence, sourceX, sourceY, TILE, TILE, x, y, TILE, TILE);
+}
+
+function drawCampFenceBack(
+  ctx: CanvasRenderingContext2D,
+  images: ImageBank,
+  camp: Building,
+) {
+  const x = camp.x - 96;
+  const y = camp.y - 154;
+  drawFenceTile(ctx, images, 0, 0, x, y);
+  drawFenceTile(ctx, images, 64, 0, x + 64, y);
+  drawFenceTile(ctx, images, 192, 0, x + 128, y);
+  drawFenceTile(ctx, images, 0, 64, x, y + 64);
+  drawFenceTile(ctx, images, 192, 64, x + 128, y + 64);
+}
+
+function drawCampFenceFront(
+  ctx: CanvasRenderingContext2D,
+  images: ImageBank,
+  state: GameState,
+  camp: Building,
+) {
+  const x = camp.x - 96;
+  const y = camp.y + 6;
+  const faded = unitOverlapsOccluder(state, camp.x, camp.y + 28, 118, 58);
+  ctx.save();
+  ctx.globalAlpha = faded ? 0.3 : 1;
+  drawFenceTile(ctx, images, 0, 128, x, y);
+  drawFenceTile(ctx, images, 64, 128, x + 64, y);
+  drawFenceTile(ctx, images, 192, 128, x + 128, y);
+  ctx.restore();
+}
+
+function campDecor(camp: Building): Decor[] {
+  if (camp.kind === "rootTree") {
+    return [
+      {
+        key: "skullSpike1",
+        x: camp.x - 146,
+        y: camp.y + 22,
+        w: 54,
+        h: 108,
+        occludes: true,
+      },
+      {
+        key: "skullSpike2",
+        x: camp.x + 146,
+        y: camp.y + 16,
+        w: 54,
+        h: 108,
+        occludes: true,
+      },
+      { key: "bones3", x: camp.x - 92, y: camp.y + 44, w: 58, h: 58 },
+      { key: "bones1", x: camp.x + 94, y: camp.y + 48, w: 58, h: 58 },
+    ];
+  }
+  if (camp.kind === "cave") {
+    return [
+      { key: "bones1", x: camp.x - 118, y: camp.y + 36, w: 58, h: 58 },
+      { key: "bones2", x: camp.x + 116, y: camp.y + 38, w: 58, h: 58 },
+      { key: "rock3", x: camp.x + 128, y: camp.y - 58, w: 52, h: 52 },
+    ];
+  }
+  return [
+    {
+      key: camp.kind === "goblinTower" ? "bush2" : "bush1",
+      x: camp.x - 118,
+      y: camp.y + 28,
+      w: 68,
+      h: 68,
+      frameSize: 128,
+      frame: camp.variant,
+      occludes: true,
+    },
+    { key: "bones3", x: camp.x + 112, y: camp.y + 38, w: 54, h: 54 },
+  ];
 }
 
 function drawDecor(ctx: CanvasRenderingContext2D, images: ImageBank, state: GameState, decor: Decor) {
@@ -3281,18 +3796,32 @@ function drawSeaDecor(ctx: CanvasRenderingContext2D, images: ImageBank, state: G
   }
 }
 
-function decorMatchesState(state: GameState, decor: Decor) {
+function decorForState(state: GameState) {
   if (state.mode === "stage") {
-    return !decor.maps || decor.maps.includes(state.level);
+    return STAGE_DECOR.filter(
+      (decor) =>
+        (!decor.maps || decor.maps.includes(state.level)) &&
+        stateTerrainAtCell(state, Math.floor(decor.x / TILE), Math.floor(decor.y / TILE)) !==
+          "water",
+    );
   }
-  const region = Math.floor(decor.x / (ENDLESS_REGION_WIDTH * TILE));
-  if (region >= state.endlessTier) return false;
-  const mapId = endlessRegionMap(state, region);
-  return (
-    (!decor.maps || decor.maps.includes(mapId)) &&
-    stateTerrainAtCell(state, Math.floor(decor.x / TILE), Math.floor(decor.y / TILE)) !==
-      "water"
-  );
+  const decor: Decor[] = [];
+  for (let region = 0; region < state.endlessTier; region += 1) {
+    const baseX = region * ENDLESS_REGION_WIDTH * TILE;
+    const mapId = endlessRegionMap(state, region);
+    for (const item of ENDLESS_DECOR_TEMPLATES[mapId]) {
+      const placed = { ...item, x: baseX + item.x };
+      const terrain = stateTerrainAtCell(
+        state,
+        Math.floor(placed.x / TILE),
+        Math.floor(placed.y / TILE),
+      );
+      if (terrain !== "water" && terrain !== "bridge" && terrain !== "stair") {
+        decor.push(placed);
+      }
+    }
+  }
+  return decor;
 }
 
 export function renderGame(
@@ -3313,16 +3842,21 @@ export function renderGame(
   drawSeaDecor(ctx, images, state);
   for (const camp of state.buildings) {
     if (camp.team !== "enemy" || camp.hp <= 0) continue;
-    drawFenceLine(ctx, images, camp.x - 96, camp.y + 18, 3);
+    if (camp.kind !== "rootTree") drawCampFenceBack(ctx, images, camp);
   }
 
   const queue: Array<{ y: number; draw: () => void }> = [];
-  for (const decor of DECOR) {
-    if (!decorMatchesState(state, decor)) continue;
+  for (const decor of decorForState(state)) {
     queue.push({ y: decor.y, draw: () => drawDecor(ctx, images, state, decor) });
   }
   for (const node of state.nodes) {
     queue.push({ y: node.y, draw: () => drawResource(ctx, images, state, node) });
+  }
+  for (const camp of state.buildings) {
+    if (camp.team !== "enemy" || camp.hp <= 0) continue;
+    for (const decor of campDecor(camp)) {
+      queue.push({ y: decor.y, draw: () => drawDecor(ctx, images, state, decor) });
+    }
   }
   for (const building of state.buildings) {
     if (building.hp <= 0) continue;
@@ -3337,6 +3871,12 @@ export function renderGame(
           state.selectedBuildingId === building.id,
         ),
     });
+    if (building.team === "enemy" && building.kind !== "rootTree") {
+      queue.push({
+        y: building.y + 76,
+        draw: () => drawCampFenceFront(ctx, images, state, building),
+      });
+    }
   }
   for (const unit of state.units) {
     queue.push({
@@ -3454,6 +3994,8 @@ export function renderMinimap(
           ? "#b88852"
           : terrain === "hill"
             ? "#759b74"
+            : terrain === "cliff"
+              ? "#557878"
             : terrain === "stair"
               ? "#d0a76b"
             : terrain === "autumn"

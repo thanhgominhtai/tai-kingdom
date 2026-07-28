@@ -671,6 +671,25 @@ canvas {
   font-weight: 700;
 }
 
+.setting-row > span {
+  display: grid;
+  gap: 4px;
+}
+
+.setting-row > span strong {
+  color: #2f3e4b;
+  font-size: 0.95rem;
+}
+
+.setting-row > span small {
+  max-width: 390px;
+  color: #706b60;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
 .paper-tabs {
   border-color: rgba(60, 76, 87, 0.35);
   background: rgba(68, 132, 145, 0.16);
@@ -973,7 +992,7 @@ canvas {
 }
 
 .game-screen.large-ui {
-  --ui-multiplier: 1.08;
+  --ui-multiplier: 1.14;
 }
 
 .game-top-hud {
@@ -2068,6 +2087,10 @@ canvas {
 [data-tip]:focus-visible::after {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+.tooltips-disabled [data-tip]::after {
+  display: none;
 }
 
 .result-panel {

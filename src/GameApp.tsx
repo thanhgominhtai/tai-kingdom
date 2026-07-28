@@ -80,7 +80,6 @@ type Screen =
 interface Settings {
   tooltips: boolean;
   tutorial: boolean;
-  sound: boolean;
   largeUi: boolean;
   devMode: boolean;
 }
@@ -88,14 +87,13 @@ interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   tooltips: true,
   tutorial: true,
-  sound: true,
   largeUi: true,
   devMode: false,
 };
 
-const SAVE_KEY = "tai-kingdom-campaign-v5";
+const SAVE_KEY = "tai-kingdom-campaign-v6";
 const LOCALE_KEY = "tai-kingdom-locale";
-const SETTINGS_KEY = "tai-kingdom-settings-v3";
+const SETTINGS_KEY = "tai-kingdom-settings-v4";
 const MAP_UNLOCK_KEY = "tai-kingdom-unlocked-map-v2";
 
 function PaperButton({
@@ -522,18 +520,23 @@ function HowScreen({
 
 function ToggleRow({
   label,
+  description,
   value,
   onChange,
   t,
 }: {
   label: string;
+  description: string;
   value: boolean;
   onChange: () => void;
   t: ReturnType<typeof translator>;
 }) {
   return (
     <div className="setting-row">
-      <span>{label}</span>
+      <span>
+        <strong>{label}</strong>
+        <small>{description}</small>
+      </span>
       <button
         className={`toggle-switch ${value ? "enabled" : ""}`}
         onClick={onChange}
@@ -588,30 +591,28 @@ function SettingsScreen({
         </div>
         <ToggleRow
           label={t("tooltips")}
+          description={t("tooltipsDesc")}
           value={settings.tooltips}
           onChange={() => flip("tooltips")}
           t={t}
         />
         <ToggleRow
           label={t("tutorialHints")}
+          description={t("tutorialHintsDesc")}
           value={settings.tutorial}
           onChange={() => flip("tutorial")}
           t={t}
         />
         <ToggleRow
-          label={t("sound")}
-          value={settings.sound}
-          onChange={() => flip("sound")}
-          t={t}
-        />
-        <ToggleRow
           label={`${t("uiScale")}: ${settings.largeUi ? t("large") : t("normal")}`}
+          description={t("uiScaleDesc")}
           value={settings.largeUi}
           onChange={() => flip("largeUi")}
           t={t}
         />
         <ToggleRow
           label={t("devMode")}
+          description={t("devModeDesc")}
           value={settings.devMode}
           onChange={() => flip("devMode")}
           t={t}
@@ -736,6 +737,7 @@ function descriptionKey(kind: UnitKind | BuildingKind | ResourceKind): CopyKey |
     monastery: "monasteryDesc",
     goblinHouse: "houseDesc",
     goblinTower: "towerDesc",
+    rootTree: "rootTreeDesc",
   };
   return map[kind] ?? null;
 }
@@ -865,6 +867,7 @@ function CommandDeck({
     cave: "/game-assets/enemies/cave.png",
     goblinHouse: "/game-assets/enemies/goblin-house.png",
     goblinTower: "/game-assets/enemies/goblin-tower.png",
+    rootTree: "/game-assets/decor/dead-tree.png",
   };
 
   if (building) {
@@ -1580,7 +1583,11 @@ function GameScene({
         : `${t("preparing")} · ${Math.max(0, Math.ceil(hud.waveClock))}s`;
 
   return (
-    <main className={`game-screen ${settings.largeUi ? "large-ui" : ""}`}>
+    <main
+      className={`game-screen ${settings.largeUi ? "large-ui" : ""} ${
+        settings.tooltips ? "" : "tooltips-disabled"
+      }`}
+    >
       <header className="game-top-hud">
         <div className="resource-strip hud-cluster wood-panel">
           <ResourceHud kind="wood" value={hud.resources.wood} label={t("wood")} />
@@ -1612,9 +1619,21 @@ function GameScene({
 
         <div className="hud-actions hud-cluster wood-panel">
           <div className="zoom-controls" aria-label={t("zoomMap")}>
-            <button onClick={() => handleZoom(-1)} data-tip={t("zoomOut")}>−</button>
+            <button
+              onClick={() => handleZoom(-1)}
+              data-tip={t("zoomOut")}
+              aria-label={t("zoomOut")}
+            >
+              −
+            </button>
             <span>{Math.round(zoom * 100)}%</span>
-            <button onClick={() => handleZoom(1)} data-tip={t("zoomIn")}>+</button>
+            <button
+              onClick={() => handleZoom(1)}
+              data-tip={t("zoomIn")}
+              aria-label={t("zoomIn")}
+            >
+              +
+            </button>
           </div>
           <div className="speed-controls" aria-label={t("gameSpeed")}>
             {([1, 2, 3, 4] as const).map((value) => (
@@ -1630,16 +1649,6 @@ function GameScene({
           </div>
           <button onClick={handlePause} data-tip={t("pause")} aria-label={t("pause")}>
             {paused ? "▶" : "Ⅱ"}
-          </button>
-          <button
-            onClick={() => {
-              pausedRef.current = true;
-              setPaused(true);
-            }}
-            data-tip={t("mainMenu")}
-            aria-label={t("mainMenu")}
-          >
-            ☰
           </button>
           {settings.devMode && (
             <button
