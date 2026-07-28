@@ -49,6 +49,7 @@ interface Point {
 export interface Camera {
   x: number;
   y: number;
+  zoom: number;
 }
 
 export interface Unit {
@@ -143,7 +144,7 @@ export type NoticeKey =
   | null;
 
 export interface GameState {
-  version: 3;
+  version: 4;
   mode: GameMode;
   level: number;
   time: number;
@@ -167,6 +168,7 @@ export interface GameState {
   tutorialStep: number;
   tutorialEnabled: boolean;
   autoFarm: boolean;
+  devGodMode: boolean;
   nestsCleared: number;
   outcome: "playing" | "victory" | "defeat";
   notice: NoticeKey;
@@ -208,7 +210,37 @@ interface BuildingSpec {
   frame?: number;
 }
 
-type TerrainKind = "water" | "grass" | "deep" | "autumn" | "road" | "bridge" | "hill";
+type TerrainKind =
+  | "water"
+  | "grass"
+  | "deep"
+  | "autumn"
+  | "road"
+  | "bridge"
+  | "hill"
+  | "stair";
+
+interface CellRect {
+  c: number;
+  r: number;
+  w: number;
+  h: number;
+}
+
+interface RangeRect {
+  c1: number;
+  r1: number;
+  c2: number;
+  r2: number;
+}
+
+interface MapLayout {
+  hills: CellRect[];
+  roads: RangeRect[];
+  bridges: RangeRect[];
+  stairs: RangeRect[];
+  palette: "spring" | "deep" | "autumn" | "coast";
+}
 
 export const UNIT_SPEC: Record<UnitKind, UnitSpec> = {
   pawn: { hp: 80, speed: 96, damage: 4, range: 36, cooldown: 1.3, frame: 192, scale: 0.54 },
@@ -217,7 +249,7 @@ export const UNIT_SPEC: Record<UnitKind, UnitSpec> = {
   archer: { hp: 120, speed: 91, damage: 22, range: 245, cooldown: 1.15, frame: 192, scale: 0.56 },
   monk: { hp: 130, speed: 89, damage: 8, range: 150, cooldown: 1.4, frame: 192, scale: 0.56 },
   gnome: { hp: 68, speed: 86, damage: 11, range: 40, cooldown: 0.85, frame: 192, scale: 0.54 },
-  goblin: { hp: 105, speed: 77, damage: 16, range: 58, cooldown: 1, frame: 192, scale: 0.58 },
+  goblin: { hp: 105, speed: 77, damage: 16, range: 58, cooldown: 1, frame: 256, scale: 0.435 },
   gnoll: { hp: 145, speed: 70, damage: 22, range: 190, cooldown: 1.35, frame: 192, scale: 0.61 },
   thief: { hp: 96, speed: 118, damage: 17, range: 40, cooldown: 0.68, frame: 192, scale: 0.54 },
   skull: { hp: 170, speed: 65, damage: 23, range: 46, cooldown: 1.05, frame: 192, scale: 0.59 },
@@ -286,23 +318,106 @@ const ENEMY_SPAWNS = [
   { x: 2680, y: 1570 },
 ];
 
-const HILLS = [
-  { c: 9, r: 3, w: 7, h: 4 },
-  { c: 29, r: 18, w: 7, h: 4 },
-  { c: 36, r: 8, w: 5, h: 3 },
-];
+export const MAP_COUNT = 4;
 
-const ROADS = [
-  { c1: 5, r1: 23, c2: 24, r2: 24 },
-  { c1: 23, r1: 8, c2: 42, r2: 9 },
-  { c1: 15, r1: 14, c2: 19, r2: 15 },
-];
+const MAP_LAYOUTS: Record<number, MapLayout> = {
+  1: {
+    hills: [
+      { c: 9, r: 3, w: 7, h: 4 },
+      { c: 29, r: 18, w: 7, h: 4 },
+      { c: 36, r: 8, w: 5, h: 3 },
+    ],
+    roads: [
+      { c1: 5, r1: 23, c2: 24, r2: 24 },
+      { c1: 23, r1: 8, c2: 42, r2: 9 },
+      { c1: 15, r1: 14, c2: 19, r2: 15 },
+    ],
+    bridges: [
+      { c1: 22, r1: 8, c2: 24, r2: 9 },
+      { c1: 22, r1: 23, c2: 24, r2: 24 },
+      { c1: 7, r1: 14, c2: 12, r2: 15 },
+    ],
+    stairs: [
+      { c1: 12, r1: 5, c2: 12, r2: 7 },
+      { c1: 32, r1: 20, c2: 32, r2: 22 },
+    ],
+    palette: "spring",
+  },
+  2: {
+    hills: [
+      { c: 5, r: 4, w: 8, h: 5 },
+      { c: 27, r: 4, w: 7, h: 5 },
+      { c: 35, r: 21, w: 7, h: 4 },
+    ],
+    roads: [
+      { c1: 5, r1: 22, c2: 20, r2: 24 },
+      { c1: 18, r1: 6, c2: 43, r2: 8 },
+      { c1: 28, r1: 14, c2: 33, r2: 18 },
+    ],
+    bridges: [
+      { c1: 17, r1: 6, c2: 19, r2: 7 },
+      { c1: 17, r1: 23, c2: 19, r2: 24 },
+      { c1: 31, r1: 14, c2: 32, r2: 16 },
+    ],
+    stairs: [
+      { c1: 9, r1: 7, c2: 9, r2: 10 },
+      { c1: 30, r1: 7, c2: 30, r2: 10 },
+      { c1: 38, r1: 23, c2: 38, r2: 26 },
+    ],
+    palette: "deep",
+  },
+  3: {
+    hills: [
+      { c: 3, r: 12, w: 7, h: 5 },
+      { c: 18, r: 4, w: 7, h: 4 },
+      { c: 35, r: 9, w: 8, h: 5 },
+    ],
+    roads: [
+      { c1: 5, r1: 22, c2: 25, r2: 24 },
+      { c1: 22, r1: 10, c2: 43, r2: 12 },
+      { c1: 16, r1: 17, c2: 28, r2: 18 },
+    ],
+    bridges: [
+      { c1: 22, r1: 10, c2: 24, r2: 11 },
+      { c1: 22, r1: 24, c2: 24, r2: 25 },
+      { c1: 10, r1: 9, c2: 16, r2: 10 },
+      { c1: 29, r1: 20, c2: 35, r2: 21 },
+    ],
+    stairs: [
+      { c1: 6, r1: 15, c2: 6, r2: 18 },
+      { c1: 21, r1: 6, c2: 21, r2: 9 },
+      { c1: 39, r1: 12, c2: 39, r2: 16 },
+    ],
+    palette: "autumn",
+  },
+  4: {
+    hills: [
+      { c: 18, r: 5, w: 10, h: 5 },
+      { c: 5, r: 18, w: 7, h: 5 },
+      { c: 37, r: 18, w: 7, h: 5 },
+    ],
+    roads: [
+      { c1: 5, r1: 22, c2: 16, r2: 24 },
+      { c1: 14, r1: 8, c2: 34, r2: 10 },
+      { c1: 33, r1: 17, c2: 43, r2: 19 },
+    ],
+    bridges: [
+      { c1: 13, r1: 8, c2: 15, r2: 9 },
+      { c1: 13, r1: 23, c2: 15, r2: 24 },
+      { c1: 32, r1: 17, c2: 34, r2: 18 },
+    ],
+    stairs: [
+      { c1: 22, r1: 8, c2: 22, r2: 11 },
+      { c1: 8, r1: 21, c2: 8, r2: 25 },
+      { c1: 40, r1: 21, c2: 40, r2: 25 },
+    ],
+    palette: "coast",
+  },
+};
 
-const BRIDGES = [
-  { c1: 22, r1: 8, c2: 24, r2: 9 },
-  { c1: 22, r1: 23, c2: 24, r2: 24 },
-  { c1: 7, r1: 14, c2: 12, r2: 15 },
-];
+function mapLayout(level: number) {
+  return MAP_LAYOUTS[Math.max(1, Math.min(MAP_COUNT, level))];
+}
 
 function inside(c: number, r: number, rect: { c: number; r: number; w: number; h: number }) {
   return c >= rect.c && c < rect.c + rect.w && r >= rect.r && r < rect.r + rect.h;
@@ -312,29 +427,46 @@ function inRange(c: number, r: number, rect: { c1: number; r1: number; c2: numbe
   return c >= rect.c1 && c <= rect.c2 && r >= rect.r1 && r <= rect.r2;
 }
 
-function terrainAtCell(c: number, r: number): TerrainKind {
-  if (c < 2 || r < 2 || c >= COLS - 2 || r >= ROWS - 2) return "water";
-  const bridge = BRIDGES.some((rect) => inRange(c, r, rect));
+function terrainAtCell(c: number, r: number, level = 1): TerrainKind {
+  const layout = mapLayout(level);
+  if (c < 3 || r < 3 || c >= COLS - 3 || r >= ROWS - 3) return "water";
+  const bridge = layout.bridges.some((rect) => inRange(c, r, rect));
   if (bridge) return "bridge";
-  const river = c >= 22 && c <= 24 && r >= 2 && r < ROWS - 2;
-  const lake = c >= 7 && c <= 12 && r >= 12 && r <= 17;
-  const northInlet = c >= 34 && c <= 40 && r >= 2 && r <= 6;
-  const southCove = c >= 35 && c <= 42 && r >= 26 && r < ROWS - 2;
-  if (river || lake || northInlet || southCove) return "water";
-  if (HILLS.some((rect) => inside(c, r, rect))) return "hill";
-  if (ROADS.some((rect) => inRange(c, r, rect))) return "road";
-  if ((c > 25 && r < 12) || (c > 38 && r < 20)) return "autumn";
-  if (r < 9 || (c > 26 && r > 17)) return "deep";
+  const stair = layout.stairs.some((rect) => inRange(c, r, rect));
+  if (stair) return "stair";
+  const water =
+    level === 1
+      ? (c >= 22 && c <= 24) ||
+        (c >= 7 && c <= 12 && r >= 12 && r <= 17) ||
+        (c >= 34 && c <= 40 && r <= 6) ||
+        (c >= 35 && c <= 42 && r >= 26)
+      : level === 2
+        ? (c >= 17 && c <= 19) ||
+          (r >= 14 && r <= 16 && c >= 18 && c <= 42) ||
+          (c >= 2 && c <= 7 && r >= 26)
+        : level === 3
+          ? (c >= 22 && c <= 24) ||
+            (c >= 10 && c <= 16 && r >= 7 && r <= 13) ||
+            (c >= 29 && c <= 35 && r >= 17 && r <= 23)
+          : (c >= 13 && c <= 15) ||
+            (c >= 32 && c <= 34 && r >= 10) ||
+            (r >= 2 && r <= 5 && c >= 3 && c <= 10) ||
+            (r >= 26 && c >= 20 && c <= 30);
+  if (water) return "water";
+  if (layout.hills.some((rect) => inside(c, r, rect))) return "hill";
+  if (layout.roads.some((rect) => inRange(c, r, rect))) return "road";
+  if (layout.palette === "autumn" || (layout.palette === "coast" && c > 26)) return "autumn";
+  if (layout.palette === "deep" || r < 9 || (c > 26 && r > 17)) return "deep";
   return "grass";
 }
 
-function cellWalkable(c: number, r: number) {
+function cellWalkable(c: number, r: number, level = 1) {
   if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
-  const kind = terrainAtCell(c, r);
+  const kind = terrainAtCell(c, r, level);
   return kind !== "water" && kind !== "hill";
 }
 
-export function isWalkable(x: number, y: number, padding = 18) {
+export function isWalkable(x: number, y: number, padding = 18, level = 1) {
   const samples = [
     [x, y],
     [x - padding, y - padding],
@@ -343,13 +475,35 @@ export function isWalkable(x: number, y: number, padding = 18) {
     [x + padding, y + padding],
   ];
   return samples.every(([sx, sy]) =>
-    cellWalkable(Math.floor(sx / TILE), Math.floor(sy / TILE)),
+    cellWalkable(Math.floor(sx / TILE), Math.floor(sy / TILE), level),
   );
 }
 
+function nearestWalkablePoint(
+  x: number,
+  y: number,
+  level: number,
+  padding: number,
+) {
+  if (isWalkable(x, y, padding, level)) return { x, y };
+  const baseC = Math.floor(x / TILE);
+  const baseR = Math.floor(y / TILE);
+  for (let radius = 1; radius < 14; radius += 1) {
+    for (let r = baseR - radius; r <= baseR + radius; r += 1) {
+      for (let c = baseC - radius; c <= baseC + radius; c += 1) {
+        if (Math.abs(c - baseC) !== radius && Math.abs(r - baseR) !== radius) continue;
+        const candidate = { x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 };
+        if (isWalkable(candidate.x, candidate.y, padding, level)) return candidate;
+      }
+    }
+  }
+  return null;
+}
+
 export function clampCamera(camera: Camera) {
-  camera.x = Math.max(0, Math.min(WORLD_W - VIEW_W, camera.x));
-  camera.y = Math.max(0, Math.min(WORLD_H - VIEW_H, camera.y));
+  camera.zoom = Math.max(0.72, Math.min(1.5, camera.zoom || 1));
+  camera.x = Math.max(0, Math.min(WORLD_W - VIEW_W / camera.zoom, camera.x));
+  camera.y = Math.max(0, Math.min(WORLD_H - VIEW_H / camera.zoom, camera.y));
 }
 
 export function createCamera(state: GameState): Camera {
@@ -357,19 +511,20 @@ export function createCamera(state: GameState): Camera {
   const camera = {
     x: (castle?.x ?? PLAYER_SPAWN.x) - VIEW_W * 0.43,
     y: (castle?.y ?? PLAYER_SPAWN.y) - VIEW_H * 0.62,
+    zoom: 1,
   };
   clampCamera(camera);
   return camera;
 }
 
-function nearestWalkableCell(c: number, r: number) {
-  if (cellWalkable(c, r)) return { c, r };
+function nearestWalkableCell(c: number, r: number, level: number) {
+  if (cellWalkable(c, r, level)) return { c, r };
   for (let radius = 1; radius < 12; radius += 1) {
     for (let y = r - radius; y <= r + radius; y += 1) {
       for (let x = c - radius; x <= c + radius; x += 1) {
         if (
           (Math.abs(x - c) === radius || Math.abs(y - r) === radius) &&
-          cellWalkable(x, y)
+          cellWalkable(x, y, level)
         ) {
           return { c: x, r: y };
         }
@@ -379,9 +534,15 @@ function nearestWalkableCell(c: number, r: number) {
   return null;
 }
 
-function findPath(startX: number, startY: number, targetX: number, targetY: number): Point[] {
-  const start = nearestWalkableCell(Math.floor(startX / TILE), Math.floor(startY / TILE));
-  const goal = nearestWalkableCell(Math.floor(targetX / TILE), Math.floor(targetY / TILE));
+function findPath(
+  startX: number,
+  startY: number,
+  targetX: number,
+  targetY: number,
+  level: number,
+): Point[] {
+  const start = nearestWalkableCell(Math.floor(startX / TILE), Math.floor(startY / TILE), level);
+  const goal = nearestWalkableCell(Math.floor(targetX / TILE), Math.floor(targetY / TILE), level);
   if (!start || !goal) return [];
   const startKey = start.r * COLS + start.c;
   const goalKey = goal.r * COLS + goal.c;
@@ -427,10 +588,10 @@ function findPath(startX: number, startY: number, targetX: number, targetY: numb
         y: Math.floor(key / COLS) * TILE + TILE / 2,
       }));
       points.push({
-        x: cellWalkable(Math.floor(targetX / TILE), Math.floor(targetY / TILE))
+        x: cellWalkable(Math.floor(targetX / TILE), Math.floor(targetY / TILE), level)
           ? targetX
           : goal.c * TILE + TILE / 2,
-        y: cellWalkable(Math.floor(targetX / TILE), Math.floor(targetY / TILE))
+        y: cellWalkable(Math.floor(targetX / TILE), Math.floor(targetY / TILE), level)
           ? targetY
           : goal.r * TILE + TILE / 2,
       });
@@ -442,8 +603,12 @@ function findPath(startX: number, startY: number, targetX: number, targetY: numb
     for (const [dc, dr] of directions) {
       const nc = cc + dc;
       const nr = cr + dr;
-      if (!cellWalkable(nc, nr)) continue;
-      if (dc && dr && (!cellWalkable(cc + dc, cr) || !cellWalkable(cc, cr + dr))) {
+      if (!cellWalkable(nc, nr, level)) continue;
+      if (
+        dc &&
+        dr &&
+        (!cellWalkable(cc + dc, cr, level) || !cellWalkable(cc, cr + dr, level))
+      ) {
         continue;
       }
       const neighbor = nr * COLS + nc;
@@ -546,7 +711,7 @@ function createNode(
     maxAmount: amount,
     variant,
     respawnClock: 0,
-    respawnDelay: kind === "wood" ? 48 : kind === "gold" ? 65 : 38,
+    respawnDelay: kind === "wood" ? 28 : kind === "gold" ? 40 : 22,
   };
 }
 
@@ -555,8 +720,9 @@ export function createInitialGame(
   mode: GameMode = "stage",
   level = 1,
 ): GameState {
+  level = Math.max(1, Math.min(MAP_COUNT, level));
   const state: GameState = {
-    version: 3,
+    version: 4,
     mode,
     level,
     time: 0,
@@ -572,13 +738,14 @@ export function createInitialGame(
     selectedUnitIds: [],
     populationCap: mode === "endless" ? 18 : 12,
     wave: 0,
-    totalWaves: mode === "stage" ? Math.min(6, 4 + Math.max(0, level - 1)) : 0,
+    totalWaves: mode === "stage" ? 4 : 0,
     waveClock: mode === "stage" ? 48 : 34,
     waveActive: false,
     bossSpawned: false,
     tutorialStep: tutorialEnabled ? 0 : 7,
     tutorialEnabled,
     autoFarm: mode === "endless",
+    devGodMode: false,
     nestsCleared: 0,
     outcome: "playing",
     notice: null,
@@ -646,6 +813,29 @@ export function createInitialGame(
   state.nodes = nodes.map(([kind, x, y, variant], index) =>
     createNode(200 + index, kind, x, y, kind === "gold" ? 130 : kind === "meat" ? 90 : 150, variant),
   );
+  for (const building of state.buildings) {
+    const safe = nearestWalkablePoint(building.x, building.y, level, 42);
+    if (safe) {
+      building.x = safe.x;
+      building.y = safe.y;
+    }
+  }
+  for (const unit of state.units) {
+    const safe = nearestWalkablePoint(unit.x, unit.y, level, 18);
+    if (safe) {
+      unit.x = safe.x;
+      unit.y = safe.y;
+      unit.targetX = unit.x;
+      unit.targetY = unit.y;
+    }
+  }
+  for (const node of state.nodes) {
+    const safe = nearestWalkablePoint(node.x, node.y, level, 24);
+    if (safe) {
+      node.x = safe.x;
+      node.y = safe.y;
+    }
+  }
   return state;
 }
 
@@ -654,7 +844,7 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
   try {
     const parsed = JSON.parse(raw) as GameState;
     if (
-      parsed.version !== 3 ||
+      parsed.version !== 4 ||
       !Array.isArray(parsed.units) ||
       !Array.isArray(parsed.buildings) ||
       !parsed.resources
@@ -672,9 +862,10 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
     parsed.noticeAge = 0;
     parsed.projectiles ??= [];
     parsed.effects ??= [];
+    parsed.devGodMode = false;
     parsed.nodes.forEach((node) => {
       node.respawnClock ??= 0;
-      node.respawnDelay ??= node.kind === "wood" ? 48 : node.kind === "gold" ? 65 : 38;
+      node.respawnDelay ??= node.kind === "wood" ? 28 : node.kind === "gold" ? 40 : 22;
     });
     parsed.units.forEach((unit) => {
       unit.path ??= [];
@@ -758,6 +949,66 @@ export function setAutoFarm(state: GameState, enabled: boolean) {
   setNotice(state, enabled ? "autoFarmOn" : "autoFarmOff");
 }
 
+export function setDevGodMode(state: GameState, enabled: boolean) {
+  state.devGodMode = enabled;
+  if (enabled) devHealAll(state);
+}
+
+export function devAddResources(state: GameState, amount = 500) {
+  state.resources.wood += amount;
+  state.resources.gold += amount;
+  state.resources.meat += amount;
+}
+
+export function devMaxResources(state: GameState) {
+  state.resources = { wood: 9999, gold: 9999, meat: 9999 };
+}
+
+export function devHealAll(state: GameState) {
+  for (const unit of state.units) {
+    if (unit.team === "player") unit.hp = unit.maxHp;
+  }
+  for (const building of state.buildings) {
+    if (building.team === "player") building.hp = building.maxHp;
+  }
+}
+
+export function devSpawnEnemy(state: GameState, kind: EnemyKind) {
+  const castle = state.buildings.find(
+    (building) => building.kind === "castle" && building.hp > 0,
+  );
+  const x = Math.min(WORLD_W - 180, (castle?.x ?? 560) + 650);
+  const y = Math.max(180, (castle?.y ?? 1515) - 250);
+  const safe = nearestWalkableCell(Math.floor(x / TILE), Math.floor(y / TILE), state.level);
+  const unit = createUnit(
+    nextId(state),
+    kind,
+    "enemy",
+    (safe?.c ?? Math.floor(x / TILE)) * TILE + TILE / 2,
+    (safe?.r ?? Math.floor(y / TILE)) * TILE + TILE / 2,
+    state.level,
+  );
+  unit.boss = kind === "troll" || kind === "minotaur";
+  state.units.push(unit);
+  addEffect(state, "dust", unit.x, unit.y, 0.55);
+}
+
+export function devNextWave(state: GameState) {
+  state.units = state.units.filter((unit) => unit.team === "player");
+  state.waveActive = false;
+  state.waveClock = 0;
+}
+
+export function devWinMap(state: GameState) {
+  state.units = state.units.filter((unit) => unit.team === "player");
+  state.wave = state.totalWaves;
+  state.waveActive = false;
+  state.bossSpawned = true;
+  const cave = state.buildings.find((building) => building.kind === "cave");
+  if (cave) cave.hp = 0;
+  state.outcome = "victory";
+}
+
 export function beginBuild(state: GameState, kind: "house" | "tower") {
   if (!canAfford(state, BUILD_COST[kind])) {
     setNotice(state, "insufficient");
@@ -781,8 +1032,8 @@ export function setBuildHover(state: GameState, x: number, y: number) {
 }
 
 function placementIsValid(state: GameState, x: number, y: number) {
-  if (!isWalkable(x, y, 70)) return false;
-  if (terrainAtCell(Math.floor(x / TILE), Math.floor(y / TILE)) === "bridge") return false;
+  if (!isWalkable(x, y, 70, state.level)) return false;
+  if (terrainAtCell(Math.floor(x / TILE), Math.floor(y / TILE), state.level) === "bridge") return false;
   if (
     state.buildings.some((building) => {
       if (building.hp <= 0) return false;
@@ -986,10 +1237,10 @@ function clearTargets(unit: Unit) {
   unit.path = [];
 }
 
-function setDestination(unit: Unit, x: number, y: number) {
+function setDestination(state: GameState, unit: Unit, x: number, y: number) {
   unit.targetX = x;
   unit.targetY = y;
-  unit.path = findPath(unit.x, unit.y, x, y);
+  unit.path = findPath(unit.x, unit.y, x, y, state.level);
   unit.pathClock = 0.7;
 }
 
@@ -1027,14 +1278,14 @@ export function issueCommand(state: GameState, x: number, y: number) {
       unit.targetResourceId = resource.id;
       unit.homeResourceId = resource.id;
       unit.workingResource = resource.kind;
-      setDestination(unit, resource.x, resource.y + 26);
+      setDestination(state, unit, resource.x, resource.y + 26);
     }
     state.marker = { x, y, age: 0, kind: "gather" };
     if (state.tutorialStep === 1 && resource.kind === "wood") state.tutorialStep = 2;
     return;
   }
 
-  if (!isWalkable(x, y, 8)) {
+  if (!isWalkable(x, y, 8, state.level)) {
     state.marker = { x, y, age: 0, kind: "invalid" };
     return;
   }
@@ -1046,7 +1297,7 @@ export function issueCommand(state: GameState, x: number, y: number) {
     const row = Math.floor(index / columns);
     const ox = (col - (columns - 1) / 2) * 46;
     const oy = row * 38;
-    setDestination(unit, x + ox, y + oy);
+    setDestination(state, unit, x + ox, y + oy);
     unit.action = "move";
   });
   state.marker = { x, y, age: 0, kind: "move" };
@@ -1065,9 +1316,9 @@ function moveDirect(unit: Unit, x: number, y: number, dt: number) {
   return length <= UNIT_SPEC[unit.kind].speed * dt + 3;
 }
 
-function moveAlongPath(unit: Unit, dt: number) {
+function moveAlongPath(state: GameState, unit: Unit, dt: number) {
   if (!unit.path.length) {
-    unit.path = findPath(unit.x, unit.y, unit.targetX, unit.targetY);
+    unit.path = findPath(unit.x, unit.y, unit.targetX, unit.targetY, state.level);
     if (!unit.path.length) return true;
   }
   const next = unit.path[0];
@@ -1088,6 +1339,7 @@ function addEffect(
 }
 
 function damageBuilding(state: GameState, building: Building, amount: number) {
+  if (state.devGodMode && building.team === "player") return;
   if (building.hp <= 0) return;
   building.hp = Math.max(0, building.hp - amount);
   if (building.hp <= 0) {
@@ -1106,6 +1358,7 @@ function damageBuilding(state: GameState, building: Building, amount: number) {
 }
 
 function damageUnit(state: GameState, unit: Unit, amount: number) {
+  if (state.devGodMode && unit.team === "player") return;
   const guarded = unit.action === "guard" && (unit.kind === "lancer" || unit.kind === "skull");
   unit.hp = Math.max(0, unit.hp - amount * (guarded ? 0.5 : 1));
   if (unit.hp <= 0) addEffect(state, "explosion", unit.x, unit.y - 20, 0.65);
@@ -1133,6 +1386,9 @@ function waveRoster(state: GameState): EnemyKind[] {
   if (wave === state.totalWaves) {
     return ["troll", "minotaur", "panda", "gnoll", "skull", "thief", "goblin"];
   }
+  if (wave === Math.ceil(state.totalWaves / 2)) {
+    return ["minotaur", "gnoll", "skull", "goblin", "goblin"];
+  }
   if (ratio > 0.62) return ["minotaur", "panda", "gnoll", "skull", "thief", "goblin", "goblin"];
   if (ratio > 0.34) return ["gnoll", "thief", "thief", "skull", "goblin", "goblin"];
   return ["gnome", "gnome", "goblin", "goblin", "thief"];
@@ -1154,6 +1410,12 @@ function spawnWave(state: GameState) {
     if (kind === "troll") {
       unit.boss = true;
       state.bossSpawned = true;
+    } else if (
+      state.mode === "stage" &&
+      kind === "minotaur" &&
+      state.wave === Math.ceil(state.totalWaves / 2)
+    ) {
+      unit.boss = true;
     }
     unit.anim += index * 0.14;
     state.units.push(unit);
@@ -1185,19 +1447,59 @@ function nearestResource(state: GameState, unit: Unit) {
     )[0];
 }
 
-function beginGather(unit: Unit, node: ResourceNode) {
+function beginGather(state: GameState, unit: Unit, node: ResourceNode) {
   clearTargets(unit);
   unit.action = "gather";
   unit.targetResourceId = node.id;
   unit.homeResourceId = node.id;
   unit.workingResource = node.kind;
-  setDestination(unit, node.x, node.y + 28);
+  setDestination(state, unit, node.x, node.y + 28);
 }
 
 function updatePawn(state: GameState, unit: Unit, dt: number) {
+  unit.healClock = Math.max(0, unit.healClock - dt);
+  const threat = nearestEnemy(state, unit, 165);
+  if (threat) {
+    const castle = state.buildings.find(
+      (building) => building.kind === "castle" && building.hp > 0,
+    );
+    if (castle) {
+      const fleeX = castle.x + 105;
+      const fleeY = castle.y + 25;
+      if (
+        unit.action !== "move" ||
+        distance(unit.targetX, unit.targetY, fleeX, fleeY) > 30
+      ) {
+        clearTargets(unit);
+        unit.action = "move";
+        setDestination(state, unit, fleeX, fleeY);
+      }
+      moveAlongPath(state, unit, dt);
+      return;
+    }
+  }
+  if (unit.action === "move") {
+    if (moveAlongPath(state, unit, dt)) unit.action = "idle";
+    return;
+  }
+  const wounded = state.units
+    .filter(
+      (candidate) =>
+        candidate.team === "player" &&
+        candidate.kind !== "pawn" &&
+        candidate.hp > 0 &&
+        candidate.hp < candidate.maxHp &&
+        distance(unit.x, unit.y, candidate.x, candidate.y) < 115,
+    )
+    .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+  if (wounded && unit.healClock <= 0) {
+    wounded.hp = Math.min(wounded.maxHp, wounded.hp + 8);
+    unit.healClock = 2.4;
+    addEffect(state, "heal", wounded.x, wounded.y - 18, 0.55);
+  }
   if (unit.action === "idle" && state.autoFarm) {
     const node = nearestResource(state, unit);
-    if (node) beginGather(unit, node);
+    if (node) beginGather(state, unit, node);
   }
   if (unit.action === "gather") {
     let node = state.nodes.find(
@@ -1205,7 +1507,7 @@ function updatePawn(state: GameState, unit: Unit, dt: number) {
     );
     if (!node && state.autoFarm) {
       node = nearestResource(state, unit);
-      if (node) beginGather(unit, node);
+      if (node) beginGather(state, unit, node);
     }
     if (!node) {
       unit.action = "idle";
@@ -1216,8 +1518,8 @@ function updatePawn(state: GameState, unit: Unit, dt: number) {
     unit.targetX = node.x;
     unit.targetY = node.y + 28;
     if (distance(unit.x, unit.y, unit.targetX, unit.targetY) > 44) {
-      if (!unit.path.length) setDestination(unit, unit.targetX, unit.targetY);
-      moveAlongPath(unit, dt);
+      if (!unit.path.length) setDestination(state, unit, unit.targetX, unit.targetY);
+      moveAlongPath(state, unit, dt);
       return;
     }
     unit.gatherClock += dt;
@@ -1245,8 +1547,8 @@ function updatePawn(state: GameState, unit: Unit, dt: number) {
     unit.targetX = castle.x + 85;
     unit.targetY = castle.y - 4;
     if (distance(unit.x, unit.y, unit.targetX, unit.targetY) > 50) {
-      if (!unit.path.length) setDestination(unit, unit.targetX, unit.targetY);
-      moveAlongPath(unit, dt);
+      if (!unit.path.length) setDestination(state, unit, unit.targetX, unit.targetY);
+      moveAlongPath(state, unit, dt);
       return;
     }
     if (unit.carrying) {
@@ -1258,10 +1560,10 @@ function updatePawn(state: GameState, unit: Unit, dt: number) {
     const home = state.nodes.find(
       (node) => node.id === unit.homeResourceId && node.amount > 0,
     );
-    if (home) beginGather(unit, home);
+    if (home) beginGather(state, unit, home);
     else if (state.autoFarm) {
       const next = nearestResource(state, unit);
-      if (next) beginGather(unit, next);
+      if (next) beginGather(state, unit, next);
       else unit.action = "idle";
     } else {
       unit.action = "idle";
@@ -1270,13 +1572,13 @@ function updatePawn(state: GameState, unit: Unit, dt: number) {
   }
 }
 
-function refreshChasePath(unit: Unit, x: number, y: number, dt: number) {
+function refreshChasePath(state: GameState, unit: Unit, x: number, y: number, dt: number) {
   unit.pathClock -= dt;
   if (unit.pathClock <= 0 || !unit.path.length) {
-    setDestination(unit, x, y);
+    setDestination(state, unit, x, y);
     unit.pathClock = 0.8;
   }
-  moveAlongPath(unit, dt);
+  moveAlongPath(state, unit, dt);
 }
 
 function updatePlayerCombat(state: GameState, unit: Unit, dt: number) {
@@ -1331,7 +1633,7 @@ function updatePlayerCombat(state: GameState, unit: Unit, dt: number) {
   const d = distance(unit.x, unit.y, tx, ty);
   if (d > spec.range) {
     unit.action = "attack";
-    refreshChasePath(unit, tx, ty, dt);
+    refreshChasePath(state, unit, tx, ty, dt);
     return;
   }
   unit.path = [];
@@ -1447,7 +1749,7 @@ function updateEnemy(state: GameState, unit: Unit, dt: number) {
   }
   if (d > spec.range) {
     unit.action = "move";
-    refreshChasePath(unit, tx, ty, dt);
+    refreshChasePath(state, unit, tx, ty, dt);
     return;
   }
   unit.path = [];
@@ -1609,15 +1911,12 @@ export function updateGame(state: GameState, dt: number) {
       updateEnemy(state, unit, dt);
       continue;
     }
-    if (
-      unit.kind === "pawn" &&
-      (unit.action === "gather" || unit.action === "return" || (unit.action === "idle" && state.autoFarm))
-    ) {
+    if (unit.kind === "pawn") {
       updatePawn(state, unit, dt);
       continue;
     }
     if (unit.action === "move") {
-      if (moveAlongPath(unit, dt)) unit.action = unit.kind === "lancer" ? "guard" : "idle";
+      if (moveAlongPath(state, unit, dt)) unit.action = unit.kind === "lancer" ? "guard" : "idle";
       continue;
     }
     if (unit.action === "attack" || unit.action === "heal" || unit.targetUnitId || unit.targetBuildingId) {
@@ -1625,7 +1924,7 @@ export function updateGame(state: GameState, dt: number) {
       continue;
     }
     const nearby = nearestEnemy(state, unit, unit.kind === "archer" ? 245 : 135);
-    if (nearby && unit.kind !== "pawn") {
+    if (nearby) {
       unit.targetUnitId = nearby.id;
       unit.action = "attack";
     } else if (unit.kind === "monk") {
@@ -1708,10 +2007,13 @@ function tileAsset(kind: TerrainKind): AssetKey {
 }
 
 function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: GameState, camera: Camera) {
+  const visibleW = VIEW_W / camera.zoom;
+  const visibleH = VIEW_H / camera.zoom;
+  const layout = mapLayout(state.level);
   const firstC = Math.max(0, Math.floor(camera.x / TILE) - 2);
-  const lastC = Math.min(COLS - 1, Math.ceil((camera.x + VIEW_W) / TILE) + 2);
+  const lastC = Math.min(COLS - 1, Math.ceil((camera.x + visibleW) / TILE) + 2);
   const firstR = Math.max(0, Math.floor(camera.y / TILE) - 2);
-  const lastR = Math.min(ROWS - 1, Math.ceil((camera.y + VIEW_H) / TILE) + 2);
+  const lastR = Math.min(ROWS - 1, Math.ceil((camera.y + visibleH) / TILE) + 2);
   for (let r = firstR; r <= lastR; r += 1) {
     for (let c = firstC; c <= lastC; c += 1) {
       ctx.drawImage(images.water, c * TILE, r * TILE, TILE, TILE);
@@ -1719,12 +2021,12 @@ function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: Ga
   }
   for (let r = firstR; r <= lastR; r += 1) {
     for (let c = firstC; c <= lastC; c += 1) {
-      const kind = terrainAtCell(c, r);
+      const kind = terrainAtCell(c, r, state.level);
       if (kind === "water" || kind === "bridge" || kind === "hill") continue;
-      const leftWater = terrainAtCell(c - 1, r) === "water";
-      const rightWater = terrainAtCell(c + 1, r) === "water";
-      const topWater = terrainAtCell(c, r - 1) === "water";
-      const bottomWater = terrainAtCell(c, r + 1) === "water";
+      const leftWater = terrainAtCell(c - 1, r, state.level) === "water";
+      const rightWater = terrainAtCell(c + 1, r, state.level) === "water";
+      const topWater = terrainAtCell(c, r - 1, state.level) === "water";
+      const bottomWater = terrainAtCell(c, r + 1, state.level) === "water";
       const sx = leftWater ? 0 : rightWater ? 128 : 64;
       const sy = topWater ? 0 : bottomWater ? 128 : 64;
       if (leftWater || rightWater || topWater || bottomWater) {
@@ -1749,13 +2051,13 @@ function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: Ga
     }
   }
 
-  drawElevation(ctx, images, 9 * TILE, 3 * TILE, 7, 4, state.time);
-  drawElevation(ctx, images, 29 * TILE, 18 * TILE, 7, 4, state.time);
-  drawElevation(ctx, images, 36 * TILE, 8 * TILE, 5, 3, state.time);
-  drawBridge(ctx, images, 22 * TILE, 8 * TILE, 1);
-  drawBridge(ctx, images, 22 * TILE, 23 * TILE, 1);
-  drawBridge(ctx, images, 7 * TILE, 14 * TILE, 2);
-  drawWorldPaths(ctx, images);
+  for (const hill of layout.hills) {
+    drawElevation(ctx, images, hill.c * TILE, hill.r * TILE, hill.w, hill.h, state.time);
+  }
+  for (const bridge of layout.bridges) drawBridgeRect(ctx, images, bridge);
+  for (const stair of layout.stairs) drawStairs(ctx, images, stair);
+  drawWorldPaths(ctx, images, state.level);
+  drawFactionZones(ctx);
 }
 
 function drawElevation(
@@ -1792,11 +2094,49 @@ function drawBridge(ctx: CanvasRenderingContext2D, images: ImageBank, x: number,
   }
 }
 
-function drawWorldPaths(ctx: CanvasRenderingContext2D, images: ImageBank) {
+function drawBridgeRect(
+  ctx: CanvasRenderingContext2D,
+  images: ImageBank,
+  rect: RangeRect,
+) {
+  const width = rect.c2 - rect.c1 + 1;
+  const height = rect.r2 - rect.r1 + 1;
+  if (width >= height) {
+    drawBridge(ctx, images, rect.c1 * TILE, rect.r1 * TILE, Math.max(1, Math.ceil(width / 3)));
+    return;
+  }
+  ctx.save();
+  ctx.translate((rect.c1 + 1) * TILE, rect.r1 * TILE);
+  ctx.rotate(Math.PI / 2);
+  drawBridge(ctx, images, 0, 0, Math.max(1, Math.ceil(height / 3)));
+  ctx.restore();
+}
+
+function drawStairs(ctx: CanvasRenderingContext2D, images: ImageBank, rect: RangeRect) {
+  for (let r = rect.r1; r <= rect.r2; r += 1) {
+    for (let c = rect.c1; c <= rect.c2; c += 1) {
+      ctx.save();
+      ctx.drawImage(images.bridgeAll, 64, 0, 64, 64, c * TILE, r * TILE, 64, 64);
+      ctx.fillStyle = "rgba(62, 47, 38, .32)";
+      for (let step = 1; step < 5; step += 1) {
+        ctx.fillRect(c * TILE + 8, r * TILE + step * 12, 48, 3);
+      }
+      ctx.restore();
+    }
+  }
+}
+
+function drawWorldPaths(ctx: CanvasRenderingContext2D, images: ImageBank, level: number) {
+  const offsets = [
+    [0, 0],
+    [-210, 120],
+    [170, -100],
+    [-80, -180],
+  ][Math.max(0, Math.min(3, level - 1))];
   const fieldPatches = [
-    { x: 850, y: 1090, sx: 0 },
-    { x: 1730, y: 740, sx: 320 },
-    { x: 2070, y: 1440, sx: 0 },
+    { x: 850 + offsets[0], y: 1090 + offsets[1], sx: 0 },
+    { x: 1730 - offsets[0] * 0.4, y: 740 - offsets[1] * 0.3, sx: 320 },
+    { x: 2070 + offsets[0] * 0.3, y: 1440 + offsets[1] * 0.35, sx: 0 },
   ];
   for (const patch of fieldPatches) {
     ctx.save();
@@ -1813,6 +2153,32 @@ function drawWorldPaths(ctx: CanvasRenderingContext2D, images: ImageBank) {
     }
     ctx.restore();
   }
+}
+
+function drawFactionZones(ctx: CanvasRenderingContext2D) {
+  ctx.save();
+  ctx.setLineDash([18, 12]);
+  ctx.lineWidth = 4;
+  ctx.fillStyle = "rgba(73, 152, 180, .075)";
+  ctx.strokeStyle = "rgba(185, 235, 245, .48)";
+  ctx.beginPath();
+  ctx.ellipse(640, 1510, 560, 390, -0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "rgba(198, 72, 72, .075)";
+  ctx.strokeStyle = "rgba(255, 177, 143, .5)";
+  ctx.beginPath();
+  ctx.ellipse(2600, 940, 430, 710, 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = '900 18px "Segoe UI", sans-serif';
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(225, 248, 248, .68)";
+  ctx.fillText("CROWN TERRITORY", 620, 1210);
+  ctx.fillStyle = "rgba(255, 210, 177, .7)";
+  ctx.fillText("ENEMY FRONT", 2600, 1180);
+  ctx.restore();
 }
 
 function drawHealthBar(
@@ -1927,6 +2293,12 @@ function unitAsset(unit: Unit): AssetKey {
     if (unit.carrying === "meat") return "pawnMeat";
     return "pawnWood";
   }
+  if (
+    unit.path.length > 0 &&
+    (unit.action === "gather" || unit.action === "attack")
+  ) {
+    return sprites.run;
+  }
   if (unit.action === "move" || unit.action === "return") return sprites.run;
   if (
     unit.action === "attack" ||
@@ -1957,12 +2329,16 @@ function drawUnit(ctx: CanvasRenderingContext2D, images: ImageBank, unit: Unit, 
     ctx.stroke();
   }
   const image = images[unitAsset(unit)];
+  const travelling =
+    unit.action === "move" ||
+    unit.action === "return" ||
+    ((unit.action === "attack" || unit.action === "gather") && unit.path.length > 0);
   const fps =
-    unit.action === "attack" || unit.action === "gather" || unit.action === "heal"
+    travelling
+      ? 9
+      : unit.action === "attack" || unit.action === "gather" || unit.action === "heal"
       ? 11
-      : unit.action === "move" || unit.action === "return"
-        ? 9
-        : 7;
+      : 7;
   drawSprite(ctx, image, spec.frame, Math.floor(unit.anim * fps), unit.x, unit.y, spec.scale, unit.facing);
   if (unit.hp < unit.maxHp || selected || unit.boss) {
     drawHealthBar(
@@ -1989,6 +2365,27 @@ function drawResource(
   state: GameState,
   node: ResourceNode,
 ) {
+  const drawRespawnMarker = () => {
+    const progress =
+      node.respawnDelay > 0
+        ? 1 - Math.max(0, node.respawnClock) / node.respawnDelay
+        : 0;
+    ctx.save();
+    ctx.fillStyle = "rgba(44, 58, 57, .4)";
+    ctx.beginPath();
+    ctx.ellipse(node.x, node.y - 4, 31, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 237, 171, .78)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y - 8, 21, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+    ctx.stroke();
+    ctx.fillStyle = "#fff0b5";
+    ctx.font = '900 12px "Segoe UI", sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText(`${Math.ceil(node.respawnClock)}s`, node.x, node.y - 4);
+    ctx.restore();
+  };
   if (node.kind === "wood") {
     const key = `tree${(node.variant % 4) + 1}` as AssetKey;
     const image = node.amount > 0 ? images[key] : images.stump1;
@@ -2000,10 +2397,14 @@ function drawResource(
     ctx.globalAlpha = faded ? 0.3 : 1;
     ctx.drawImage(image, node.x - width / 2, node.y - height * 0.82, width, height);
     ctx.restore();
+    if (node.amount <= 0) drawRespawnMarker();
     return;
   }
   if (node.kind === "gold") {
-    if (node.amount <= 0) return;
+    if (node.amount <= 0) {
+      drawRespawnMarker();
+      return;
+    }
     const key = `gold${(node.variant % 3) + 1}` as AssetKey;
     const image = images[key];
     const scale = 0.82;
@@ -2016,7 +2417,10 @@ function drawResource(
     );
     return;
   }
-  if (node.amount <= 0) return;
+  if (node.amount <= 0) {
+    drawRespawnMarker();
+    return;
+  }
   drawSprite(
     ctx,
     images.sheepIdle,
@@ -2124,10 +2528,16 @@ function drawSeaDecor(ctx: CanvasRenderingContext2D, images: ImageBank, time: nu
     drawSprite(ctx, images[rock.key], 64, Math.floor(time * 7 + rock.seed), rock.x, rock.y, 1);
   }
   const clouds = [
-    { key: "cloud1" as const, x: -70, y: 520, w: 330, h: 147, speed: 3 },
-    { key: "cloud2" as const, x: 2750, y: 980, w: 300, h: 134, speed: 4 },
-    { key: "cloud3" as const, x: 1080, y: 60, w: 270, h: 120, speed: 2 },
-    { key: "cloud1" as const, x: 1240, y: 1930, w: 310, h: 138, speed: 5 },
+    { key: "cloud1" as const, x: -18, y: 300, w: 205, h: 91, speed: 3 },
+    { key: "cloud2" as const, x: -30, y: 760, w: 220, h: 98, speed: 4 },
+    { key: "cloud3" as const, x: -12, y: 1420, w: 190, h: 84, speed: 2 },
+    { key: "cloud2" as const, x: 2875, y: 470, w: 215, h: 96, speed: 5 },
+    { key: "cloud1" as const, x: 2880, y: 1040, w: 205, h: 91, speed: 3 },
+    { key: "cloud3" as const, x: 2900, y: 1620, w: 180, h: 80, speed: 4 },
+    { key: "cloud3" as const, x: 950, y: 42, w: 225, h: 100, speed: 2 },
+    { key: "cloud1" as const, x: 1740, y: 32, w: 235, h: 104, speed: 5 },
+    { key: "cloud2" as const, x: 1020, y: 1938, w: 220, h: 98, speed: 4 },
+    { key: "cloud1" as const, x: 2110, y: 1928, w: 225, h: 100, speed: 3 },
   ];
   for (const cloud of clouds) {
     ctx.save();
@@ -2150,6 +2560,7 @@ export function renderGame(
   ctx.fillStyle = "#49aaab";
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.save();
+  ctx.scale(camera.zoom, camera.zoom);
   ctx.translate(-Math.round(camera.x), -Math.round(camera.y));
   drawTerrain(ctx, images, state, camera);
   drawSeaDecor(ctx, images, state.time);
@@ -2263,13 +2674,15 @@ export function renderMinimap(
   ctx.fillRect(0, 0, w, h);
   for (let r = 0; r < ROWS; r += 1) {
     for (let c = 0; c < COLS; c += 1) {
-      const terrain = terrainAtCell(c, r);
+      const terrain = terrainAtCell(c, r, state.level);
       if (terrain === "water") continue;
       ctx.fillStyle =
         terrain === "bridge"
           ? "#b88852"
           : terrain === "hill"
             ? "#759b74"
+            : terrain === "stair"
+              ? "#d0a76b"
             : terrain === "autumn"
               ? "#aab758"
               : "#8fbd67";
@@ -2287,7 +2700,12 @@ export function renderMinimap(
   }
   ctx.strokeStyle = "#fff4b5";
   ctx.lineWidth = 2;
-  ctx.strokeRect(camera.x * sx, camera.y * sy, VIEW_W * sx, VIEW_H * sy);
+  ctx.strokeRect(
+    camera.x * sx,
+    camera.y * sy,
+    (VIEW_W / camera.zoom) * sx,
+    (VIEW_H / camera.zoom) * sy,
+  );
 }
 
 export function renderMenuWorld(
@@ -2297,6 +2715,6 @@ export function renderMenuWorld(
 ) {
   const state = createInitialGame(false, "stage", 1);
   state.time = time;
-  const camera = { x: 80, y: 1060 };
+  const camera = { x: 80, y: 1060, zoom: 1 };
   renderGame(ctx, images, state, camera);
 }

@@ -11,6 +11,7 @@ import { loadGameImages, type ImageBank } from "./game/assets";
 import {
   BUILD_COST,
   BUILDING_SPEC,
+  MAP_COUNT,
   UNIT_COST,
   VIEW_H,
   VIEW_W,
@@ -21,6 +22,12 @@ import {
   clampCamera,
   createCamera,
   createInitialGame,
+  devAddResources,
+  devHealAll,
+  devMaxResources,
+  devNextWave,
+  devSpawnEnemy,
+  devWinMap,
   getHoverTarget,
   issueCommand,
   placeBuilding,
@@ -34,11 +41,13 @@ import {
   serializeGame,
   setAutoFarm,
   setBuildHover,
+  setDevGodMode,
   trainUnit,
   updateGame,
   type Building,
   type BuildingKind,
   type Camera,
+  type EnemyKind,
   type GameMode,
   type GameState,
   type HoverTarget,
@@ -56,9 +65,9 @@ type Screen =
   | "language"
   | "menu"
   | "modes"
+  | "maps"
   | "how"
   | "settings"
-  | "credits"
   | "game"
   | "victory"
   | "defeat";
@@ -68,6 +77,7 @@ interface Settings {
   tutorial: boolean;
   sound: boolean;
   largeUi: boolean;
+  devMode: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -75,11 +85,13 @@ const DEFAULT_SETTINGS: Settings = {
   tutorial: true,
   sound: true,
   largeUi: true,
+  devMode: false,
 };
 
-const SAVE_KEY = "tai-kingdom-campaign-v3";
+const SAVE_KEY = "tai-kingdom-campaign-v4";
 const LOCALE_KEY = "tai-kingdom-locale";
-const SETTINGS_KEY = "tai-kingdom-settings-v2";
+const SETTINGS_KEY = "tai-kingdom-settings-v3";
+const MAP_UNLOCK_KEY = "tai-kingdom-unlocked-map-v1";
 
 function PaperButton({
   children,
@@ -218,7 +230,7 @@ function MenuScreen({
       <div className="screen-vignette" />
 
       <header className="menu-topbar">
-        <span className="chapter-badge">{t("missionLabel")} · TINY SWORDS RTS</span>
+        <span className="chapter-badge">TAI&apos;KINGDOM · REALTIME STRATEGY</span>
         <div className="language-tabs" aria-label={t("chooseLanguage")}>
           <button
             className={locale === "vi" ? "active" : ""}
@@ -267,12 +279,6 @@ function MenuScreen({
               <span className="button-glyph">⚙</span>
               {t("settings")}
             </PaperButton>
-            <button
-              className="text-link"
-              onClick={() => onNavigate("credits")}
-            >
-              {t("credits")}
-            </button>
           </div>
         </section>
 
@@ -282,7 +288,7 @@ function MenuScreen({
           <p>{t("missionDesc")}</p>
           <div className="mission-summary">
             <span>
-              <img src="/game-assets/ui/wood.png" alt="" /> 3 {t("wave")}
+              <img src="/game-assets/ui/wood.png" alt="" /> 4 {t("wave")}
             </span>
             <span>
               <SpritePreview src="/game-assets/units/warrior-idle.png" /> 5{" "}
@@ -343,6 +349,84 @@ function ModeScreen({
               <b>{t("endlessModeGoal")}</b>
             </span>
           </button>
+        </div>
+        <div className="panel-footer">
+          <PaperButton onClick={onBack}>{t("back")}</PaperButton>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+const MAP_CARDS = [
+  { id: 1, name: "map1Name", desc: "map1Desc", tone: "spring" },
+  { id: 2, name: "map2Name", desc: "map2Desc", tone: "river" },
+  { id: 3, name: "map3Name", desc: "map3Desc", tone: "autumn" },
+  { id: 4, name: "map4Name", desc: "map4Desc", tone: "coast" },
+] as const;
+
+function MapPreview({ level }: { level: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!ctx) return;
+    const state = createInitialGame(false, "stage", level);
+    renderMinimap(ctx, state, { x: 0, y: 0, zoom: 0.72 });
+  }, [level]);
+
+  return <canvas ref={canvasRef} width={288} height={176} aria-hidden="true" />;
+}
+
+function MapScreen({
+  locale,
+  mode,
+  unlockedMap,
+  devMode,
+  onChoose,
+  onBack,
+}: {
+  locale: Locale;
+  mode: GameMode;
+  unlockedMap: number;
+  devMode: boolean;
+  onChoose: (level: number) => void;
+  onBack: () => void;
+}) {
+  const t = translator(locale);
+  return (
+    <main className="storybook-screen modal-screen map-screen">
+      <MenuWorld />
+      <div className="screen-vignette" />
+      <section className="paper-panel map-panel">
+        <RibbonTitle>{t("chooseMap")}</RibbonTitle>
+        <p className="book-intro">{t("chooseMapIntro")}</p>
+        <div className="map-grid">
+          {MAP_CARDS.map((map) => {
+            const locked = mode === "stage" && map.id > unlockedMap && !devMode;
+            return (
+              <button
+                key={map.id}
+                className={`map-card map-${map.tone} ${locked ? "locked" : ""}`}
+                disabled={locked}
+                onClick={() => onChoose(map.id)}
+              >
+                <span className="map-preview">
+                  <MapPreview level={map.id} />
+                  <b>{locked ? "🔒" : `0${map.id}`}</b>
+                </span>
+                <span className="map-card-copy">
+                  <small>
+                    {mode === "stage" ? `${t("level")} ${map.id}` : t("endlessMode")}
+                  </small>
+                  <strong>{t(map.name)}</strong>
+                  <em>{t(map.desc)}</em>
+                  <i>{locked ? t("mapLocked") : t("twoBossPhases")}</i>
+                </span>
+              </button>
+            );
+          })}
         </div>
         <div className="panel-footer">
           <PaperButton onClick={onBack}>{t("back")}</PaperButton>
@@ -521,41 +605,12 @@ function SettingsScreen({
           onChange={() => flip("largeUi")}
           t={t}
         />
-        <div className="panel-footer">
-          <PaperButton onClick={onBack}>{t("back")}</PaperButton>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function CreditsScreen({
-  locale,
-  onBack,
-}: {
-  locale: Locale;
-  onBack: () => void;
-}) {
-  const t = translator(locale);
-  return (
-    <main className="storybook-screen modal-screen">
-      <MenuWorld />
-      <div className="screen-vignette" />
-      <section className="paper-panel credits-panel">
-        <RibbonTitle>{t("credits")}</RibbonTitle>
-        <div className="credits-art">
-          <img src="/game-assets/buildings/castle.png" alt="" />
-          <SpritePreview src="/game-assets/units/warrior-idle.png" />
-          <SpritePreview src="/game-assets/enemies/minotaur-idle.png" />
-        </div>
-        <p>{t("artCredit")}</p>
-        <a
-          href="https://pixelfrog-assets.itch.io/tiny-swords"
-          target="_blank"
-          rel="noreferrer"
-        >
-          {t("artLink")} ↗
-        </a>
+        <ToggleRow
+          label={t("devMode")}
+          value={settings.devMode}
+          onChange={() => flip("devMode")}
+          t={t}
+        />
         <div className="panel-footer">
           <PaperButton onClick={onBack}>{t("back")}</PaperButton>
         </div>
@@ -635,8 +690,8 @@ function worldPoint(
 ) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: camera.x + ((clientX - rect.left) / rect.width) * VIEW_W,
-    y: camera.y + ((clientY - rect.top) / rect.height) * VIEW_H,
+    x: camera.x + (((clientX - rect.left) / rect.width) * VIEW_W) / camera.zoom,
+    y: camera.y + (((clientY - rect.top) / rect.height) * VIEW_H) / camera.zoom,
     screenX: clientX - rect.left,
     screenY: clientY - rect.top,
   };
@@ -930,6 +985,60 @@ function CommandDeck({
   );
 }
 
+function DevPanel({
+  t,
+  godMode,
+  onGodMode,
+  onAddResources,
+  onMaxResources,
+  onHeal,
+  onSpawn,
+  onNextWave,
+  onWin,
+  onClose,
+}: {
+  t: ReturnType<typeof translator>;
+  godMode: boolean;
+  onGodMode: () => void;
+  onAddResources: () => void;
+  onMaxResources: () => void;
+  onHeal: () => void;
+  onSpawn: (kind: EnemyKind) => void;
+  onNextWave: () => void;
+  onWin: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="dev-panel paper-panel" aria-label={t("devPanel")}>
+      <header>
+        <span>
+          <b>DEV</b>
+          <strong>{t("devPanel")}</strong>
+        </span>
+        <button onClick={onClose} aria-label={t("close")}>×</button>
+      </header>
+      <div className="dev-status">
+        <span className="dev-live-dot" />
+        {t("devModeActive")}
+      </div>
+      <div className="dev-grid">
+        <button className={godMode ? "active" : ""} onClick={onGodMode}>
+          {t("godMode")} · {godMode ? t("on") : t("off")}
+        </button>
+        <button onClick={onHeal}>{t("healAll")}</button>
+        <button onClick={onAddResources}>+500 {t("allResources")}</button>
+        <button onClick={onMaxResources}>9999 {t("allResources")}</button>
+        <button onClick={() => onSpawn("goblin")}>+ Spear Goblin</button>
+        <button onClick={() => onSpawn("minotaur")}>+ Minotaur</button>
+        <button onClick={() => onSpawn("troll")}>+ Troll Boss</button>
+        <button onClick={onNextWave}>{t("nextWaveDev")}</button>
+        <button className="danger" onClick={onWin}>{t("winMapDev")}</button>
+      </div>
+      <small>{t("devHint")}</small>
+    </aside>
+  );
+}
+
 function GameScene({
   locale,
   settings,
@@ -978,6 +1087,9 @@ function GameScene({
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [speed, setSpeed] = useState<1 | 2 | 3 | 4>(1);
+  const [zoom, setZoom] = useState(1);
+  const [devPanelOpen, setDevPanelOpen] = useState(false);
+  const [devGodMode, setDevGodModeState] = useState(false);
   const [hover, setHover] = useState<{
     target: HoverTarget;
     x: number;
@@ -988,6 +1100,14 @@ function GameScene({
   const refreshHud = useCallback(() => {
     setHud(makeSnapshot(stateRef.current));
   }, []);
+
+  useEffect(() => {
+    if (!settings.devMode) {
+      setDevPanelOpen(false);
+      setDevGodModeState(false);
+      setDevGodMode(stateRef.current, false);
+    }
+  }, [settings.devMode]);
 
   useEffect(() => {
     let active = true;
@@ -1108,8 +1228,10 @@ function GameScene({
     const pointerMove = (event: PointerEvent) => {
       const point = worldPoint(canvas, cameraRef.current, event.clientX, event.clientY);
       pointerRef.current = {
-        x: point.x - cameraRef.current.x,
-        y: point.y - cameraRef.current.y,
+        x: ((event.clientX - canvas.getBoundingClientRect().left) /
+          canvas.getBoundingClientRect().width) * VIEW_W,
+        y: ((event.clientY - canvas.getBoundingClientRect().top) /
+          canvas.getBoundingClientRect().height) * VIEW_H,
         inside: true,
       };
       if (dragRef.current.active) {
@@ -1171,13 +1293,27 @@ function GameScene({
     const pointerLeave = () => {
       pointerRef.current.inside = false;
     };
+    const viewportPointerMove = (event: PointerEvent) => {
+      pointerRef.current = {
+        x: (event.clientX / window.innerWidth) * VIEW_W,
+        y: (event.clientY / window.innerHeight) * VIEW_H,
+        inside: true,
+      };
+    };
+    const viewportPointerOut = (event: PointerEvent) => {
+      if (!event.relatedTarget) pointerRef.current.inside = false;
+    };
     canvas.addEventListener("pointerleave", pointerLeave);
+    window.addEventListener("pointermove", viewportPointerMove);
+    window.addEventListener("pointerout", viewportPointerOut);
     return () => {
       canvas.removeEventListener("pointerdown", pointerDown);
       canvas.removeEventListener("pointermove", pointerMove);
       canvas.removeEventListener("pointerup", pointerUp);
       canvas.removeEventListener("contextmenu", contextMenu);
       canvas.removeEventListener("pointerleave", pointerLeave);
+      window.removeEventListener("pointermove", viewportPointerMove);
+      window.removeEventListener("pointerout", viewportPointerOut);
     };
   }, [refreshHud, settings.tooltips]);
 
@@ -1262,6 +1398,32 @@ function GameScene({
     speedRef.current = next;
     setSpeed(next);
   };
+  const panCamera = (dx: number, dy: number) => {
+    cameraRef.current.x += dx / cameraRef.current.zoom;
+    cameraRef.current.y += dy / cameraRef.current.zoom;
+    clampCamera(cameraRef.current);
+  };
+  const handleZoom = (direction: -1 | 1) => {
+    const camera = cameraRef.current;
+    const centerX = camera.x + VIEW_W / camera.zoom / 2;
+    const centerY = camera.y + VIEW_H / camera.zoom / 2;
+    const next = Math.max(0.72, Math.min(1.5, camera.zoom + direction * 0.13));
+    camera.zoom = Number(next.toFixed(2));
+    camera.x = centerX - VIEW_W / camera.zoom / 2;
+    camera.y = centerY - VIEW_H / camera.zoom / 2;
+    clampCamera(camera);
+    setZoom(camera.zoom);
+  };
+  const toggleGodMode = () => {
+    const next = !devGodMode;
+    setDevGodModeState(next);
+    setDevGodMode(stateRef.current, next);
+    refreshHud();
+  };
+  const runDevAction = (action: (state: GameState) => void) => {
+    action(stateRef.current);
+    refreshHud();
+  };
   const skipTutorial = () => {
     stateRef.current.tutorialStep = 7;
     stateRef.current.tutorialEnabled = false;
@@ -1283,8 +1445,8 @@ function GameScene({
 
   return (
     <main className={`game-screen ${settings.largeUi ? "large-ui" : ""}`}>
-      <header className="game-top-hud wood-panel">
-        <div className="resource-strip">
+      <header className="game-top-hud">
+        <div className="resource-strip hud-cluster wood-panel">
           <ResourceHud kind="wood" value={hud.resources.wood} label={t("wood")} />
           <ResourceHud kind="gold" value={hud.resources.gold} label={t("gold")} />
           <ResourceHud kind="meat" value={hud.resources.meat} label={t("meat")} />
@@ -1299,10 +1461,10 @@ function GameScene({
           </div>
         </div>
 
-        <div className="wave-status">
+        <div className="wave-status hud-cluster wood-panel">
           <small>
             {hud.mode === "stage"
-              ? `${t("stageMode")} · ${t("level")} ${hud.level}`
+              ? `${t(`map${hud.level}Name` as CopyKey)} · ${t("stageMode")}`
               : t("endlessMode")}
           </small>
           <strong>{waveLabel}</strong>
@@ -1312,7 +1474,12 @@ function GameScene({
           </span>
         </div>
 
-        <div className="hud-actions">
+        <div className="hud-actions hud-cluster wood-panel">
+          <div className="zoom-controls" aria-label={t("zoomMap")}>
+            <button onClick={() => handleZoom(-1)} data-tip={t("zoomOut")}>−</button>
+            <span>{Math.round(zoom * 100)}%</span>
+            <button onClick={() => handleZoom(1)} data-tip={t("zoomIn")}>+</button>
+          </div>
           <div className="speed-controls" aria-label={t("gameSpeed")}>
             {([1, 2, 3, 4] as const).map((value) => (
               <button
@@ -1338,6 +1505,15 @@ function GameScene({
           >
             ☰
           </button>
+          {settings.devMode && (
+            <button
+              className="dev-toggle"
+              onClick={() => setDevPanelOpen((open) => !open)}
+              data-tip={t("devPanel")}
+            >
+              DEV
+            </button>
+          )}
         </div>
       </header>
 
@@ -1350,6 +1526,13 @@ function GameScene({
           aria-label="The Verdant Reach realtime strategy battlefield"
         />
 
+        <nav className="camera-controls" aria-label={t("moveCamera")}>
+          <button className="camera-up" onClick={() => panCamera(0, -280)}>▲</button>
+          <button className="camera-right" onClick={() => panCamera(360, 0)}>▶</button>
+          <button className="camera-down" onClick={() => panCamera(0, 280)}>▼</button>
+          <button className="camera-left" onClick={() => panCamera(-360, 0)}>◀</button>
+        </nav>
+
         <div className="minimap-frame paper-chip">
           <canvas
             ref={minimapRef}
@@ -1359,9 +1542,11 @@ function GameScene({
             onClick={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
               cameraRef.current.x =
-                ((event.clientX - rect.left) / rect.width) * WORLD_W - VIEW_W / 2;
+                ((event.clientX - rect.left) / rect.width) * WORLD_W -
+                VIEW_W / cameraRef.current.zoom / 2;
               cameraRef.current.y =
-                ((event.clientY - rect.top) / rect.height) * WORLD_H - VIEW_H / 2;
+                ((event.clientY - rect.top) / rect.height) * WORLD_H -
+                VIEW_H / cameraRef.current.zoom / 2;
               clampCamera(cameraRef.current);
             }}
           />
@@ -1466,6 +1651,21 @@ function GameScene({
           <div className="game-notice">{t(hud.notice as CopyKey)}</div>
         )}
 
+        {settings.devMode && devPanelOpen && (
+          <DevPanel
+            t={t}
+            godMode={devGodMode}
+            onGodMode={toggleGodMode}
+            onAddResources={() => runDevAction((state) => devAddResources(state, 500))}
+            onMaxResources={() => runDevAction(devMaxResources)}
+            onHeal={() => runDevAction(devHealAll)}
+            onSpawn={(kind) => runDevAction((state) => devSpawnEnemy(state, kind))}
+            onNextWave={() => runDevAction(devNextWave)}
+            onWin={() => runDevAction(devWinMap)}
+            onClose={() => setDevPanelOpen(false)}
+          />
+        )}
+
         {!ready && <div className="loading-cover">{t("loading")}</div>}
 
         {paused && (
@@ -1485,6 +1685,9 @@ function GameScene({
                 onClick={() => {
                   stateRef.current = createInitialGame(settings.tutorial, mode, level);
                   cameraRef.current = createCamera(stateRef.current);
+                  setZoom(1);
+                  setDevGodModeState(false);
+                  setDevPanelOpen(false);
                   outcomeSent.current = false;
                   pausedRef.current = false;
                   setPaused(false);
@@ -1501,7 +1704,11 @@ function GameScene({
         )}
       </section>
 
-      <footer className="command-deck wood-panel">
+      <footer
+        className={`command-deck wood-panel ${
+          hud.selectedUnits.length || hud.selectedBuilding ? "has-selection" : "is-empty"
+        }`}
+      >
         <CommandDeck
           state={hud}
           t={t}
@@ -1560,7 +1767,7 @@ function ResultScreen({
           {outcome === "victory" ? t("victory") : t("defeat")}
         </RibbonTitle>
         <p>{outcome === "victory" ? t("victoryText") : t("defeatText")}</p>
-        {outcome === "victory" && mode === "stage" && (
+        {outcome === "victory" && mode === "stage" && level < MAP_COUNT && (
           <PaperButton tone="red" onClick={onNext}>
             {t("nextStage")} · {t("level")} {level + 1}
           </PaperButton>
@@ -1582,6 +1789,7 @@ export default function GameApp() {
   const [resumeSaved, setResumeSaved] = useState(false);
   const [activeMode, setActiveMode] = useState<GameMode>("stage");
   const [activeLevel, setActiveLevel] = useState(1);
+  const [unlockedMap, setUnlockedMap] = useState(1);
   const [runId, setRunId] = useState(0);
 
   useEffect(() => {
@@ -1600,6 +1808,10 @@ export default function GameApp() {
       }
     }
     setHasSave(Boolean(localStorage.getItem(SAVE_KEY)));
+    const storedUnlocked = Number(localStorage.getItem(MAP_UNLOCK_KEY));
+    if (Number.isFinite(storedUnlocked)) {
+      setUnlockedMap(Math.max(1, Math.min(MAP_COUNT, storedUnlocked)));
+    }
   }, []);
 
   const setLocale = useCallback((next: Locale) => {
@@ -1626,7 +1838,9 @@ export default function GameApp() {
       if (saved.mode === "stage" || saved.mode === "endless") {
         setActiveMode(saved.mode);
       }
-      if (Number.isFinite(saved.level)) setActiveLevel(Math.max(1, saved.level));
+      if (Number.isFinite(saved.level)) {
+        setActiveLevel(Math.max(1, Math.min(MAP_COUNT, saved.level)));
+      }
     } catch {
       return;
     }
@@ -1635,12 +1849,16 @@ export default function GameApp() {
     setScreen("game");
   }, []);
 
-  const startMode = useCallback((mode: GameMode) => {
+  const chooseMode = useCallback((mode: GameMode) => {
+    setActiveMode(mode);
+    setScreen("maps");
+  }, []);
+
+  const startMap = useCallback((level: number) => {
     localStorage.removeItem(SAVE_KEY);
     setHasSave(false);
     setResumeSaved(false);
-    setActiveMode(mode);
-    setActiveLevel(1);
+    setActiveLevel(Math.max(1, Math.min(MAP_COUNT, level)));
     setRunId((id) => id + 1);
     setScreen("game");
   }, []);
@@ -1656,8 +1874,20 @@ export default function GameApp() {
     return (
       <ModeScreen
         locale={locale}
-        onChoose={startMode}
+        onChoose={chooseMode}
         onBack={() => setScreen("menu")}
+      />
+    );
+  }
+  if (screen === "maps") {
+    return (
+      <MapScreen
+        locale={locale}
+        mode={activeMode}
+        unlockedMap={unlockedMap}
+        devMode={settings.devMode}
+        onChoose={startMap}
+        onBack={() => setScreen("modes")}
       />
     );
   }
@@ -1671,9 +1901,6 @@ export default function GameApp() {
         onBack={() => setScreen("menu")}
       />
     );
-  }
-  if (screen === "credits") {
-    return <CreditsScreen locale={locale} onBack={() => setScreen("menu")} />;
   }
   if (screen === "game") {
     return (
@@ -1690,6 +1917,14 @@ export default function GameApp() {
         }}
         onOutcome={(outcome) => {
           setHasSave(false);
+          if (outcome === "victory" && activeMode === "stage") {
+            const nextUnlocked = Math.min(MAP_COUNT, activeLevel + 1);
+            setUnlockedMap((current) => {
+              const next = Math.max(current, nextUnlocked);
+              localStorage.setItem(MAP_UNLOCK_KEY, String(next));
+              return next;
+            });
+          }
           setScreen(outcome);
         }}
         onSaveAvailable={() => setHasSave(true)}
@@ -1703,14 +1938,11 @@ export default function GameApp() {
         outcome={screen}
         mode={activeMode}
         level={activeLevel}
-        onRestart={() => startMode(activeMode)}
+        onRestart={() => startMap(activeLevel)}
         onNext={() => {
           localStorage.removeItem(SAVE_KEY);
-          setActiveMode("stage");
-          setActiveLevel((current) => current + 1);
           setResumeSaved(false);
-          setRunId((id) => id + 1);
-          setScreen("game");
+          setScreen("maps");
         }}
         onMenu={() => setScreen("menu")}
       />
