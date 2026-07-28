@@ -8,13 +8,16 @@ Web game chiến thuật thời gian thực 2D, xây bằng React + TypeScript +
 - Bốn bản đồ thế giới mở 3072×2048 có layout riêng: sông, hồ, cầu chiến
   lược, cao địa, cầu thang, đường đất, đồng cỏ, rừng và các khu hang ổ địch.
 - Camera bằng WASD/phím mũi tên, rê sát mọi cạnh, nút điều hướng hoặc click
-  minimap; hỗ trợ zoom từ 72% đến 150%.
+  minimap; lăn chuột hoặc dùng nút để zoom từ 25% đến 150%.
 - Pathfinding theo ô: quân bộ không đi xuống sông, nhưng biết tìm đường qua
   cầu; công trình và cây tự mờ khi che khuất giao tranh.
 - Chế độ **Theo màn** có bốn chiến trường mở khóa tuần tự, hai boss phase
   mỗi bản đồ và Troll boss cuối màn.
-- Chế độ **Vĩnh viễn** có Pawn tự farm, tài nguyên hồi sinh, hang ổ tái tạo và
-  wave tăng độ khó vô hạn.
+- Chế độ **Vĩnh viễn** bắt đầu ở vùng 1; phá sạch hang sẽ ghép ngẫu nhiên vùng kế
+  tiếp vào bên phải cho đến khi thành một thế giới bốn vùng. Mỗi lần mở đất có
+  thêm tài nguyên, quân tiếp viện, dân số và địch mạnh dần.
+- Cây cạn để lại gốc, Sheep biến mất 25–30 giây rồi xuất hiện ở vị trí an toàn
+  mới; Monk tự tìm đồng minh bị thương và quân phòng thủ ưu tiên kẻ đang đánh Castle.
 - Điều chỉnh nhịp game 1x/2x/3x/4x, auto-save, tooltip và hướng dẫn song ngữ
   Việt/Anh.
 - Dev Mode tùy chọn trong Cài đặt: bất tử, hồi máu, chỉnh tài nguyên, gọi quái,

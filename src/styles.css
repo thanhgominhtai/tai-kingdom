@@ -1286,7 +1286,10 @@ canvas {
   top: calc(88px * var(--ui-multiplier));
   right: 12px;
   display: grid;
+  width: min(350px, calc(100vw - 24px));
   max-width: 350px;
+  box-sizing: border-box;
+  overflow: hidden;
   padding: 9px 12px;
 }
 
@@ -1296,6 +1299,11 @@ canvas {
 }
 
 .objective-scroll span {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
   color: #59606a;
   font-size: 0.68rem;
   line-height: 1.35;

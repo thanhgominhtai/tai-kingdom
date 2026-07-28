@@ -144,7 +144,7 @@ export type NoticeKey =
   | null;
 
 export interface GameState {
-  version: 4;
+  version: 5;
   mode: GameMode;
   level: number;
   time: number;
@@ -170,6 +170,9 @@ export interface GameState {
   autoFarm: boolean;
   devGodMode: boolean;
   nestsCleared: number;
+  endlessTier: number;
+  endlessRegionOrder: number[];
+  endlessExpansionClock: number;
   outcome: "playing" | "victory" | "defeat";
   notice: NoticeKey;
   noticeAge: number;
@@ -240,6 +243,12 @@ interface MapLayout {
   bridges: RangeRect[];
   stairs: RangeRect[];
   palette: "spring" | "deep" | "autumn" | "coast";
+}
+
+interface CampLayout {
+  kind: Extract<BuildingKind, "cave" | "goblinHouse" | "goblinTower">;
+  x: number;
+  y: number;
 }
 
 export const UNIT_SPEC: Record<UnitKind, UnitSpec> = {
@@ -415,6 +424,91 @@ const MAP_LAYOUTS: Record<number, MapLayout> = {
   },
 };
 
+const STAGE_CAMPS: Record<number, CampLayout[]> = {
+  1: [
+    { kind: "cave", x: 2630, y: 350 },
+    { kind: "goblinHouse", x: 2410, y: 1010 },
+    { kind: "goblinTower", x: 2730, y: 1590 },
+  ],
+  2: [
+    { kind: "cave", x: 2670, y: 380 },
+    { kind: "goblinHouse", x: 2220, y: 690 },
+    { kind: "goblinTower", x: 2750, y: 1240 },
+    { kind: "cave", x: 2220, y: 1740 },
+  ],
+  3: [
+    { kind: "cave", x: 2720, y: 350 },
+    { kind: "goblinHouse", x: 1970, y: 430 },
+    { kind: "goblinTower", x: 2740, y: 980 },
+    { kind: "cave", x: 2020, y: 1450 },
+    { kind: "goblinHouse", x: 2620, y: 1730 },
+  ],
+  4: [
+    { kind: "cave", x: 2700, y: 390 },
+    { kind: "goblinHouse", x: 2000, y: 420 },
+    { kind: "goblinTower", x: 2480, y: 820 },
+    { kind: "cave", x: 2820, y: 1120 },
+    { kind: "goblinHouse", x: 2070, y: 1510 },
+    { kind: "goblinTower", x: 2640, y: 1740 },
+  ],
+};
+
+const ENDLESS_REGION_WIDTH = 12;
+const ENDLESS_REGION_TEMPLATES: Record<number, MapLayout> = {
+  1: {
+    hills: [
+      { c: 2, r: 5, w: 4, h: 3 },
+      { c: 7, r: 19, w: 3, h: 3 },
+    ],
+    roads: [{ c1: 4, r1: 7, c2: 7, r2: 25 }],
+    bridges: [],
+    stairs: [
+      { c1: 4, r1: 7, c2: 4, r2: 9 },
+      { c1: 8, r1: 21, c2: 8, r2: 23 },
+    ],
+    palette: "spring",
+  },
+  2: {
+    hills: [
+      { c: 6, r: 5, w: 4, h: 4 },
+      { c: 2, r: 20, w: 4, h: 3 },
+    ],
+    roads: [{ c1: 3, r1: 8, c2: 8, r2: 24 }],
+    bridges: [],
+    stairs: [
+      { c1: 7, r1: 7, c2: 7, r2: 10 },
+      { c1: 4, r1: 21, c2: 4, r2: 24 },
+    ],
+    palette: "deep",
+  },
+  3: {
+    hills: [
+      { c: 2, r: 11, w: 4, h: 4 },
+      { c: 7, r: 21, w: 3, h: 3 },
+    ],
+    roads: [{ c1: 3, r1: 6, c2: 8, r2: 25 }],
+    bridges: [],
+    stairs: [
+      { c1: 4, r1: 13, c2: 4, r2: 16 },
+      { c1: 8, r1: 22, c2: 8, r2: 25 },
+    ],
+    palette: "autumn",
+  },
+  4: {
+    hills: [
+      { c: 6, r: 6, w: 4, h: 4 },
+      { c: 2, r: 18, w: 4, h: 4 },
+    ],
+    roads: [{ c1: 3, r1: 7, c2: 8, r2: 25 }],
+    bridges: [],
+    stairs: [
+      { c1: 7, r1: 8, c2: 7, r2: 11 },
+      { c1: 4, r1: 20, c2: 4, r2: 23 },
+    ],
+    palette: "coast",
+  },
+};
+
 function mapLayout(level: number) {
   return MAP_LAYOUTS[Math.max(1, Math.min(MAP_COUNT, level))];
 }
@@ -460,9 +554,61 @@ function terrainAtCell(c: number, r: number, level = 1): TerrainKind {
   return "grass";
 }
 
+function endlessRegionMap(state: GameState, region: number) {
+  return state.endlessRegionOrder[region] ?? ((region % MAP_COUNT) + 1);
+}
+
+function endlessTerrainAtCell(state: GameState, c: number, r: number): TerrainKind {
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return "water";
+  const region = Math.floor(c / ENDLESS_REGION_WIDTH);
+  if (region >= state.endlessTier) return "water";
+  const localC = c % ENDLESS_REGION_WIDTH;
+  const mapId = endlessRegionMap(state, region);
+  const layout = ENDLESS_REGION_TEMPLATES[mapId];
+  if (r < 3 || r >= ROWS - 3) return "water";
+
+  const connectionRow = r >= 14 && r <= 16;
+  if (
+    connectionRow &&
+    ((localC === 0 && region > 0) ||
+      (localC === ENDLESS_REGION_WIDTH - 1 && region + 1 < state.endlessTier))
+  ) {
+    return "bridge";
+  }
+  if (localC === 0 || localC === ENDLESS_REGION_WIDTH - 1) return "water";
+  if (layout.stairs.some((rect) => inRange(localC, r, rect))) return "stair";
+
+  const inlet =
+    mapId === 1
+      ? localC >= 7 && localC <= 9 && r >= 10 && r <= 13
+      : mapId === 2
+        ? localC >= 2 && localC <= 4 && r >= 11 && r <= 15
+        : mapId === 3
+          ? localC >= 6 && localC <= 9 && r >= 5 && r <= 8
+          : localC >= 2 && localC <= 4 && r >= 23 && r <= 26;
+  if (inlet) return "water";
+  if (layout.hills.some((rect) => inside(localC, r, rect))) return "hill";
+  if (layout.roads.some((rect) => inRange(localC, r, rect))) return "road";
+  if (layout.palette === "autumn" || (layout.palette === "coast" && r > 16)) return "autumn";
+  if (layout.palette === "deep" || r < 9) return "deep";
+  return "grass";
+}
+
+function stateTerrainAtCell(state: GameState, c: number, r: number) {
+  return state.mode === "endless"
+    ? endlessTerrainAtCell(state, c, r)
+    : terrainAtCell(c, r, state.level);
+}
+
 function cellWalkable(c: number, r: number, level = 1) {
   if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
   const kind = terrainAtCell(c, r, level);
+  return kind !== "water" && kind !== "hill";
+}
+
+function stateCellWalkable(state: GameState, c: number, r: number) {
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
+  const kind = stateTerrainAtCell(state, c, r);
   return kind !== "water" && kind !== "hill";
 }
 
@@ -477,6 +623,40 @@ export function isWalkable(x: number, y: number, padding = 18, level = 1) {
   return samples.every(([sx, sy]) =>
     cellWalkable(Math.floor(sx / TILE), Math.floor(sy / TILE), level),
   );
+}
+
+function stateIsWalkable(state: GameState, x: number, y: number, padding = 18) {
+  const samples = [
+    [x, y],
+    [x - padding, y - padding],
+    [x + padding, y - padding],
+    [x - padding, y + padding],
+    [x + padding, y + padding],
+  ];
+  return samples.every(([sx, sy]) =>
+    stateCellWalkable(state, Math.floor(sx / TILE), Math.floor(sy / TILE)),
+  );
+}
+
+function nearestStateWalkablePoint(
+  state: GameState,
+  x: number,
+  y: number,
+  padding: number,
+) {
+  if (stateIsWalkable(state, x, y, padding)) return { x, y };
+  const baseC = Math.floor(x / TILE);
+  const baseR = Math.floor(y / TILE);
+  for (let radius = 1; radius < 16; radius += 1) {
+    for (let r = baseR - radius; r <= baseR + radius; r += 1) {
+      for (let c = baseC - radius; c <= baseC + radius; c += 1) {
+        if (Math.abs(c - baseC) !== radius && Math.abs(r - baseR) !== radius) continue;
+        const candidate = { x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 };
+        if (stateIsWalkable(state, candidate.x, candidate.y, padding)) return candidate;
+      }
+    }
+  }
+  return null;
 }
 
 function nearestWalkablePoint(
@@ -501,9 +681,13 @@ function nearestWalkablePoint(
 }
 
 export function clampCamera(camera: Camera) {
-  camera.zoom = Math.max(0.72, Math.min(1.5, camera.zoom || 1));
-  camera.x = Math.max(0, Math.min(WORLD_W - VIEW_W / camera.zoom, camera.x));
-  camera.y = Math.max(0, Math.min(WORLD_H - VIEW_H / camera.zoom, camera.y));
+  camera.zoom = Math.max(0.25, Math.min(1.5, camera.zoom || 1));
+  const maxX = WORLD_W - VIEW_W / camera.zoom;
+  const maxY = WORLD_H - VIEW_H / camera.zoom;
+  camera.x =
+    maxX < 0 ? maxX / 2 : Math.max(0, Math.min(maxX, camera.x));
+  camera.y =
+    maxY < 0 ? maxY / 2 : Math.max(0, Math.min(maxY, camera.y));
 }
 
 export function createCamera(state: GameState): Camera {
@@ -534,15 +718,75 @@ function nearestWalkableCell(c: number, r: number, level: number) {
   return null;
 }
 
+function pathCellWalkable(
+  state: GameState,
+  c: number,
+  r: number,
+  allowX: number,
+  allowY: number,
+) {
+  if (!stateCellWalkable(state, c, r)) return false;
+  const x = c * TILE + TILE / 2;
+  const y = r * TILE + TILE / 2;
+  if (distance(x, y, allowX, allowY) < 78) return true;
+  const blockedByBuilding = state.buildings.some((building) => {
+    if (building.hp <= 0) return false;
+    const size = getBuildingSize(building.kind);
+    return distance(x, y, building.x, building.y) < Math.min(82, Math.max(48, size.w * 0.3));
+  });
+  if (blockedByBuilding) return false;
+  return !state.nodes.some(
+    (node) =>
+      node.amount > 0 &&
+      node.kind === "wood" &&
+      distance(x, y, node.x, node.y) < 38,
+  );
+}
+
+function nearestStateWalkableCell(
+  state: GameState,
+  c: number,
+  r: number,
+  allowX: number,
+  allowY: number,
+) {
+  if (pathCellWalkable(state, c, r, allowX, allowY)) return { c, r };
+  for (let radius = 1; radius < 14; radius += 1) {
+    for (let y = r - radius; y <= r + radius; y += 1) {
+      for (let x = c - radius; x <= c + radius; x += 1) {
+        if (
+          (Math.abs(x - c) === radius || Math.abs(y - r) === radius) &&
+          pathCellWalkable(state, x, y, allowX, allowY)
+        ) {
+          return { c: x, r: y };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function findPath(
+  state: GameState,
   startX: number,
   startY: number,
   targetX: number,
   targetY: number,
-  level: number,
 ): Point[] {
-  const start = nearestWalkableCell(Math.floor(startX / TILE), Math.floor(startY / TILE), level);
-  const goal = nearestWalkableCell(Math.floor(targetX / TILE), Math.floor(targetY / TILE), level);
+  const start = nearestStateWalkableCell(
+    state,
+    Math.floor(startX / TILE),
+    Math.floor(startY / TILE),
+    startX,
+    startY,
+  );
+  const goal = nearestStateWalkableCell(
+    state,
+    Math.floor(targetX / TILE),
+    Math.floor(targetY / TILE),
+    targetX,
+    targetY,
+  );
   if (!start || !goal) return [];
   const startKey = start.r * COLS + start.c;
   const goalKey = goal.r * COLS + goal.c;
@@ -588,10 +832,10 @@ function findPath(
         y: Math.floor(key / COLS) * TILE + TILE / 2,
       }));
       points.push({
-        x: cellWalkable(Math.floor(targetX / TILE), Math.floor(targetY / TILE), level)
+        x: stateCellWalkable(state, Math.floor(targetX / TILE), Math.floor(targetY / TILE))
           ? targetX
           : goal.c * TILE + TILE / 2,
-        y: cellWalkable(Math.floor(targetX / TILE), Math.floor(targetY / TILE), level)
+        y: stateCellWalkable(state, Math.floor(targetX / TILE), Math.floor(targetY / TILE))
           ? targetY
           : goal.r * TILE + TILE / 2,
       });
@@ -603,11 +847,12 @@ function findPath(
     for (const [dc, dr] of directions) {
       const nc = cc + dc;
       const nr = cr + dr;
-      if (!cellWalkable(nc, nr, level)) continue;
+      if (!pathCellWalkable(state, nc, nr, targetX, targetY)) continue;
       if (
         dc &&
         dr &&
-        (!cellWalkable(cc + dc, cr, level) || !cellWalkable(cc, cr + dr, level))
+        (!pathCellWalkable(state, cc + dc, cr, targetX, targetY) ||
+          !pathCellWalkable(state, cc, cr + dr, targetX, targetY))
       ) {
         continue;
       }
@@ -711,80 +956,21 @@ function createNode(
     maxAmount: amount,
     variant,
     respawnClock: 0,
-    respawnDelay: kind === "wood" ? 28 : kind === "gold" ? 40 : 22,
+    respawnDelay: kind === "wood" ? 30 : kind === "gold" ? 40 : 27,
   };
 }
 
-export function createInitialGame(
-  tutorialEnabled = true,
-  mode: GameMode = "stage",
-  level = 1,
-): GameState {
-  level = Math.max(1, Math.min(MAP_COUNT, level));
-  const state: GameState = {
-    version: 4,
-    mode,
-    level,
-    time: 0,
-    resources:
-      mode === "endless"
-        ? { wood: 260, gold: 185, meat: 190 }
-        : { wood: 190, gold: 140, meat: 155 },
-    units: [],
-    buildings: [],
-    nodes: [],
-    projectiles: [],
-    effects: [],
-    selectedUnitIds: [],
-    populationCap: mode === "endless" ? 18 : 12,
-    wave: 0,
-    totalWaves: mode === "stage" ? 4 : 0,
-    waveClock: mode === "stage" ? 48 : 34,
-    waveActive: false,
-    bossSpawned: false,
-    tutorialStep: tutorialEnabled ? 0 : 7,
-    tutorialEnabled,
-    autoFarm: mode === "endless",
-    devGodMode: false,
-    nestsCleared: 0,
-    outcome: "playing",
-    notice: null,
-    noticeAge: 0,
-    nextId: 1000,
-  };
-
-  state.buildings = [
-    createBuilding(1, "castle", "player", 560, 1515),
-    createBuilding(2, "house", "player", 345, 1680, 0),
-    createBuilding(3, "barracks", "player", 800, 1560),
-    createBuilding(4, "tower", "player", 955, 1380),
-    createBuilding(100, "cave", "enemy", 2660, 345),
-    createBuilding(101, "goblinHouse", "enemy", 2570, 1030),
-    createBuilding(102, "goblinTower", "enemy", 2720, 1570),
-  ];
-  if (mode === "endless") {
-    state.buildings.push(
-      createBuilding(5, "archery", "player", 565, 1795),
-      createBuilding(6, "monastery", "player", 1040, 1650),
-      createBuilding(7, "house", "player", 330, 1450, 2),
-    );
+function shuffledRegionOrder() {
+  const rest = [2, 3, 4];
+  for (let index = rest.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [rest[index], rest[swap]] = [rest[swap], rest[index]];
   }
+  return [1, ...rest];
+}
 
-  state.units = [
-    createUnit(10, "pawn", "player", 610, 1580),
-    createUnit(11, "pawn", "player", 680, 1570),
-    createUnit(12, "warrior", "player", 790, 1670),
-    createUnit(13, "lancer", "player", 880, 1690),
-  ];
-  if (mode === "endless") {
-    state.units.push(
-      createUnit(14, "pawn", "player", 720, 1610),
-      createUnit(15, "archer", "player", 930, 1710),
-      createUnit(16, "monk", "player", 850, 1760),
-    );
-  }
-
-  const nodes: Array<[ResourceKind, number, number, number]> = [
+function stageResourceLayout(level: number) {
+  const base: Array<[ResourceKind, number, number, number]> = [
     ["wood", 1120, 1430, 0],
     ["wood", 1200, 1500, 1],
     ["wood", 1080, 1610, 2],
@@ -800,28 +986,215 @@ export function createInitialGame(
     ["gold", 1180, 1820, 0],
     ["gold", 1320, 1800, 1],
     ["gold", 490, 760, 2],
-    ["gold", 1780, 990, 0],
-    ["gold", 2310, 720, 2],
-    ["gold", 2380, 1770, 1],
+    ["gold", 1780, 990, 3],
+    ["gold", 2310, 720, 4],
+    ["gold", 2380, 1770, 5],
     ["meat", 960, 1810, 0],
     ["meat", 1050, 1740, 1],
-    ["meat", 350, 1180, 0],
-    ["meat", 1830, 1360, 1],
+    ["meat", 350, 1180, 2],
+    ["meat", 1830, 1360, 3],
     ["meat", 2100, 810, 0],
     ["meat", 2440, 1370, 1],
   ];
-  state.nodes = nodes.map(([kind, x, y, variant], index) =>
-    createNode(200 + index, kind, x, y, kind === "gold" ? 130 : kind === "meat" ? 90 : 150, variant),
-  );
+  const shifts = [
+    { x: 0, y: 0 },
+    { x: 120, y: -95 },
+    { x: -90, y: 80 },
+    { x: 70, y: 55 },
+  ][level - 1];
+  const shifted = base.map(([kind, x, y, variant], index) => [
+    kind,
+    x + shifts.x * (index % 2 ? 1 : -0.45),
+    y + shifts.y * (index % 3 ? 0.65 : -0.35),
+    variant + level - 1,
+  ] as [ResourceKind, number, number, number]);
+  const extras: Array<[ResourceKind, number, number, number]> = [
+    ["wood", 1520, 720, level],
+    ["gold", 1460, 1320, level + 3],
+    ["meat", 820, 520, level + 1],
+    ["wood", 2050, 1530, level + 2],
+    ["meat", 1550, 1750, level + 2],
+    ["gold", 900, 1180, level + 4],
+  ];
+  return shifted.concat(extras.slice(0, Math.max(0, level - 1) * 2));
+}
+
+function addEndlessRegionContent(state: GameState, region: number, initial = false) {
+  const baseX = region * ENDLESS_REGION_WIDTH * TILE;
+  const campSlots = [
+    { x: 570, y: 350 },
+    { x: 245, y: 760 },
+    { x: 590, y: 1110 },
+    { x: 260, y: 1510 },
+    { x: 555, y: 1740 },
+  ];
+  const count = Math.min(campSlots.length, 3 + region);
+  const campKinds: CampLayout["kind"][] = ["cave", "goblinHouse", "goblinTower"];
+  for (let index = 0; index < count; index += 1) {
+    const slot = campSlots[(index + region) % campSlots.length];
+    const camp = createBuilding(
+      nextId(state),
+      campKinds[(index + region) % campKinds.length],
+      "enemy",
+      baseX + slot.x,
+      slot.y,
+      region,
+    );
+    const safe = nearestStateWalkablePoint(state, camp.x, camp.y, 46);
+    if (safe) {
+      camp.x = safe.x;
+      camp.y = safe.y;
+    }
+    state.buildings.push(camp);
+  }
+
+  const resources: Array<[ResourceKind, number, number, number]> = [
+    ["wood", 170, 430, region],
+    ["wood", 610, 610, region + 1],
+    ["wood", 165, 1080, region + 2],
+    ["wood", 610, 1370, region + 3],
+    ["gold", 350, 570, region],
+    ["gold", 410, 1260, region + 3],
+    ["meat", 200, 1320, region],
+    ["meat", 520, 920, region + 1],
+    ["meat", 390, 1710, region + 2],
+  ];
+  for (const [kind, localX, y, variant] of resources) {
+    const node = createNode(
+      nextId(state),
+      kind,
+      baseX + localX,
+      y,
+      kind === "gold" ? 120 + region * 12 : kind === "meat" ? 86 + region * 8 : 145,
+      variant,
+    );
+    const safe = nearestStateWalkablePoint(state, node.x, node.y, 24);
+    if (safe) {
+      node.x = safe.x;
+      node.y = safe.y;
+    }
+    state.nodes.push(node);
+  }
+
+  if (!initial) {
+    state.resources.wood += 120 + region * 35;
+    state.resources.gold += 85 + region * 30;
+    state.resources.meat += 95 + region * 28;
+    state.populationCap += 5;
+    const entryX = baseX + 110;
+    const pawn = createUnit(nextId(state), "pawn", "player", entryX, 1510);
+    const reinforcement = createUnit(
+      nextId(state),
+      region >= 2 ? "lancer" : "warrior",
+      "player",
+      entryX + 58,
+      1570,
+    );
+    state.units.push(pawn, reinforcement);
+    addEffect(state, "heal", entryX + 25, 1520, 0.9);
+  }
+}
+
+export function createInitialGame(
+  tutorialEnabled = true,
+  mode: GameMode = "stage",
+  level = 1,
+): GameState {
+  level = Math.max(1, Math.min(MAP_COUNT, level));
+  const state: GameState = {
+    version: 5,
+    mode,
+    level,
+    time: 0,
+    resources:
+      mode === "endless"
+        ? { wood: 260, gold: 185, meat: 190 }
+        : { wood: 190, gold: 140, meat: 155 },
+    units: [],
+    buildings: [],
+    nodes: [],
+    projectiles: [],
+    effects: [],
+    selectedUnitIds: [],
+    populationCap: mode === "endless" ? 18 : 12 + Math.max(0, level - 1) * 2,
+    wave: 0,
+    totalWaves: mode === "stage" ? [4, 5, 5, 6][level - 1] : 0,
+    waveClock: mode === "stage" ? 48 : 34,
+    waveActive: false,
+    bossSpawned: false,
+    tutorialStep: tutorialEnabled ? 0 : 7,
+    tutorialEnabled,
+    autoFarm: mode === "endless",
+    devGodMode: false,
+    nestsCleared: 0,
+    endlessTier: 1,
+    endlessRegionOrder: shuffledRegionOrder(),
+    endlessExpansionClock: 0,
+    outcome: "playing",
+    notice: null,
+    noticeAge: 0,
+    nextId: 1000,
+  };
+
+  if (mode === "endless") {
+    state.buildings = [
+      createBuilding(1, "castle", "player", 345, 1515),
+      createBuilding(2, "house", "player", 170, 1700),
+      createBuilding(3, "barracks", "player", 570, 1580),
+      createBuilding(4, "tower", "player", 635, 1360),
+      createBuilding(5, "archery", "player", 320, 1810),
+      createBuilding(6, "monastery", "player", 560, 1810),
+    ];
+    state.units = [
+      createUnit(10, "pawn", "player", 300, 1590),
+      createUnit(11, "pawn", "player", 370, 1600),
+      createUnit(12, "warrior", "player", 470, 1650),
+      createUnit(13, "lancer", "player", 530, 1690),
+      createUnit(14, "archer", "player", 420, 1740),
+      createUnit(15, "monk", "player", 350, 1770),
+    ];
+    addEndlessRegionContent(state, 0, true);
+  } else {
+    state.buildings = [
+      createBuilding(1, "castle", "player", 560, 1515),
+      createBuilding(2, "house", "player", 345, 1680),
+      createBuilding(3, "barracks", "player", 800, 1560),
+      createBuilding(4, "tower", "player", 955, 1380),
+      ...STAGE_CAMPS[level].map((camp, index) =>
+        createBuilding(100 + index, camp.kind, "enemy", camp.x, camp.y, index),
+      ),
+    ];
+    if (level >= 2) state.buildings.push(createBuilding(5, "archery", "player", 610, 1810));
+    if (level >= 3) state.buildings.push(createBuilding(6, "monastery", "player", 890, 1810));
+    state.units = [
+      createUnit(10, "pawn", "player", 610, 1580),
+      createUnit(11, "pawn", "player", 680, 1570),
+      createUnit(12, "warrior", "player", 790, 1670),
+      createUnit(13, "lancer", "player", 880, 1690),
+    ];
+    if (level >= 2) state.units.push(createUnit(14, "archer", "player", 710, 1750));
+    if (level >= 3) state.units.push(createUnit(15, "monk", "player", 820, 1770));
+    if (level >= 4) state.units.push(createUnit(16, "warrior", "player", 940, 1710));
+    state.nodes = stageResourceLayout(level).map(([kind, x, y, variant], index) =>
+      createNode(
+        200 + index,
+        kind,
+        x,
+        y,
+        kind === "gold" ? 130 : kind === "meat" ? 90 : 150,
+        variant,
+      ),
+    );
+  }
   for (const building of state.buildings) {
-    const safe = nearestWalkablePoint(building.x, building.y, level, 42);
+    const safe = nearestStateWalkablePoint(state, building.x, building.y, 42);
     if (safe) {
       building.x = safe.x;
       building.y = safe.y;
     }
   }
   for (const unit of state.units) {
-    const safe = nearestWalkablePoint(unit.x, unit.y, level, 18);
+    const safe = nearestStateWalkablePoint(state, unit.x, unit.y, 18);
     if (safe) {
       unit.x = safe.x;
       unit.y = safe.y;
@@ -830,7 +1203,7 @@ export function createInitialGame(
     }
   }
   for (const node of state.nodes) {
-    const safe = nearestWalkablePoint(node.x, node.y, level, 24);
+    const safe = nearestStateWalkablePoint(state, node.x, node.y, 24);
     if (safe) {
       node.x = safe.x;
       node.y = safe.y;
@@ -844,7 +1217,7 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
   try {
     const parsed = JSON.parse(raw) as GameState;
     if (
-      parsed.version !== 4 ||
+      parsed.version !== 5 ||
       !Array.isArray(parsed.units) ||
       !Array.isArray(parsed.buildings) ||
       !parsed.resources
@@ -863,9 +1236,12 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
     parsed.projectiles ??= [];
     parsed.effects ??= [];
     parsed.devGodMode = false;
+    parsed.endlessTier ??= 1;
+    parsed.endlessRegionOrder ??= [1, 2, 3, 4];
+    parsed.endlessExpansionClock ??= 0;
     parsed.nodes.forEach((node) => {
       node.respawnClock ??= 0;
-      node.respawnDelay ??= node.kind === "wood" ? 28 : node.kind === "gold" ? 40 : 22;
+      node.respawnDelay ??= node.kind === "wood" ? 30 : node.kind === "gold" ? 40 : 27;
     });
     parsed.units.forEach((unit) => {
       unit.path ??= [];
@@ -1001,11 +1377,25 @@ export function devNextWave(state: GameState) {
 
 export function devWinMap(state: GameState) {
   state.units = state.units.filter((unit) => unit.team === "player");
-  state.wave = state.totalWaves;
   state.waveActive = false;
+  if (state.mode === "endless") {
+    const activeRegion = state.endlessTier - 1;
+    state.buildings
+      .filter(
+        (building) =>
+          building.team === "enemy" &&
+          building.hp > 0 &&
+          Math.floor(building.x / (ENDLESS_REGION_WIDTH * TILE)) === activeRegion,
+      )
+      .forEach((building) => damageBuilding(state, building, building.maxHp * 2));
+    state.waveClock = 6;
+    return;
+  }
+  state.wave = state.totalWaves;
   state.bossSpawned = true;
-  const cave = state.buildings.find((building) => building.kind === "cave");
-  if (cave) cave.hp = 0;
+  state.buildings
+    .filter((building) => building.team === "enemy" && building.hp > 0)
+    .forEach((building) => damageBuilding(state, building, building.maxHp * 2));
   state.outcome = "victory";
 }
 
@@ -1032,8 +1422,23 @@ export function setBuildHover(state: GameState, x: number, y: number) {
 }
 
 function placementIsValid(state: GameState, x: number, y: number) {
-  if (!isWalkable(x, y, 70, state.level)) return false;
-  if (terrainAtCell(Math.floor(x / TILE), Math.floor(y / TILE), state.level) === "bridge") return false;
+  if (!stateIsWalkable(state, x, y, 70)) return false;
+  if (stateTerrainAtCell(state, Math.floor(x / TILE), Math.floor(y / TILE)) === "bridge") {
+    return false;
+  }
+  const insideTerritory = state.buildings.some((building) => {
+    if (building.team !== "player" || building.hp <= 0) return false;
+    const influence =
+      building.kind === "castle"
+        ? 590
+        : building.kind === "house"
+          ? 310
+          : building.kind === "tower"
+            ? 280
+            : 390;
+    return distance(x, y, building.x, building.y) <= influence;
+  });
+  if (!insideTerritory) return false;
   if (
     state.buildings.some((building) => {
       if (building.hp <= 0) return false;
@@ -1071,6 +1476,8 @@ export function placeBuilding(state: GameState, x: number, y: number) {
   if (kind === "house") state.populationCap += 4;
   state.selectedBuildingId = building.id;
   state.buildMode = undefined;
+  state.notice = null;
+  state.noticeAge = 0;
   return true;
 }
 
@@ -1240,7 +1647,7 @@ function clearTargets(unit: Unit) {
 function setDestination(state: GameState, unit: Unit, x: number, y: number) {
   unit.targetX = x;
   unit.targetY = y;
-  unit.path = findPath(unit.x, unit.y, x, y, state.level);
+  unit.path = findPath(state, unit.x, unit.y, x, y);
   unit.pathClock = 0.7;
 }
 
@@ -1285,7 +1692,7 @@ export function issueCommand(state: GameState, x: number, y: number) {
     return;
   }
 
-  if (!isWalkable(x, y, 8, state.level)) {
+  if (!stateIsWalkable(state, x, y, 8)) {
     state.marker = { x, y, age: 0, kind: "invalid" };
     return;
   }
@@ -1318,7 +1725,7 @@ function moveDirect(unit: Unit, x: number, y: number, dt: number) {
 
 function moveAlongPath(state: GameState, unit: Unit, dt: number) {
   if (!unit.path.length) {
-    unit.path = findPath(unit.x, unit.y, unit.targetX, unit.targetY, state.level);
+    unit.path = findPath(state, unit.x, unit.y, unit.targetX, unit.targetY);
     if (!unit.path.length) return true;
   }
   const next = unit.path[0];
@@ -1352,7 +1759,9 @@ function damageBuilding(state: GameState, building: Building, amount: number) {
       state.nestsCleared += 1;
       state.resources.wood += 45;
       state.resources.gold += 35;
-      if (state.mode === "endless") building.respawnClock = 55;
+      if (state.mode === "endless" && state.endlessTier >= MAP_COUNT) {
+        building.respawnClock = 55 + Math.random() * 15;
+      }
     }
   }
 }
@@ -1368,18 +1777,18 @@ function waveRoster(state: GameState): EnemyKind[] {
   const wave = state.wave;
   if (state.mode === "endless") {
     const roster: EnemyKind[] = [];
-    const count = Math.min(18, 4 + wave * 2);
+    const count = Math.min(24, 3 + state.endlessTier * 2 + Math.floor(wave * 1.45));
     const pool: EnemyKind[] =
-      wave < 3
+      state.endlessTier === 1 && wave < 3
         ? ["gnome", "goblin", "thief"]
-        : wave < 6
+        : state.endlessTier < 3 && wave < 7
           ? ["goblin", "gnoll", "thief", "skull", "panda"]
           : ["gnoll", "skull", "panda", "minotaur", "thief"];
     for (let index = 0; index < count; index += 1) {
       roster.push(pool[(index * 3 + wave) % pool.length]);
     }
-    if (wave % 5 === 0) roster.unshift("troll");
-    else if (wave % 3 === 0) roster.unshift("minotaur");
+    if (state.endlessTier >= 3 && wave % 5 === 0) roster.unshift("troll");
+    else if (state.endlessTier >= 2 && wave % 3 === 0) roster.unshift("minotaur");
     return roster;
   }
   const ratio = wave / state.totalWaves;
@@ -1406,7 +1815,11 @@ function spawnWave(state: GameState) {
     const fallback = ENEMY_SPAWNS[index % ENEMY_SPAWNS.length];
     const x = (den?.x ?? fallback.x) + (index % 3) * 34 - 34;
     const y = (den?.y ?? fallback.y) + 58 + Math.floor(index / 3) * 30;
-    const unit = createUnit(nextId(state), kind, "enemy", x, y, state.level + Math.floor(state.wave / 4));
+    const difficultyLevel =
+      state.mode === "endless"
+        ? state.endlessTier + Math.floor(state.wave / 6)
+        : state.level + Math.floor(state.wave / 4);
+    const unit = createUnit(nextId(state), kind, "enemy", x, y, difficultyLevel);
     if (kind === "troll") {
       unit.boss = true;
       state.bossSpawned = true;
@@ -1435,6 +1848,29 @@ function nearestEnemy(state: GameState, unit: Unit, range: number) {
     }
   }
   return found;
+}
+
+function priorityEnemyForDefender(state: GameState, unit: Unit, localRange: number) {
+  const castle = state.buildings.find(
+    (building) => building.team === "player" && building.kind === "castle" && building.hp > 0,
+  );
+  if (castle && distance(unit.x, unit.y, castle.x, castle.y) < 720) {
+    const invader = state.units
+      .filter(
+        (enemy) =>
+          enemy.team === "enemy" &&
+          enemy.hp > 0 &&
+          (enemy.targetBuildingId === castle.id ||
+            distance(enemy.x, enemy.y, castle.x, castle.y) < 360),
+      )
+      .sort(
+        (a, b) =>
+          distance(a.x, a.y, castle.x, castle.y) -
+          distance(b.x, b.y, castle.x, castle.y),
+      )[0];
+    if (invader) return invader;
+  }
+  return nearestEnemy(state, unit, localRange);
 }
 
 function nearestResource(state: GameState, unit: Unit) {
@@ -1588,16 +2024,26 @@ function updatePlayerCombat(state: GameState, unit: Unit, dt: number) {
       .filter(
         (candidate) =>
           candidate.team === "player" &&
+          candidate.id !== unit.id &&
           candidate.hp > 0 &&
           candidate.hp < candidate.maxHp &&
-          distance(unit.x, unit.y, candidate.x, candidate.y) < 175,
+          distance(unit.x, unit.y, candidate.x, candidate.y) < 480,
       )
       .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
-    if (ally && unit.healClock <= 0) {
-      ally.hp = Math.min(ally.maxHp, ally.hp + 25);
-      unit.healClock = 1.35;
+    if (ally) {
       unit.action = "heal";
-      addEffect(state, "heal", ally.x, ally.y - 22, 0.65);
+      const allyDistance = distance(unit.x, unit.y, ally.x, ally.y);
+      if (allyDistance > 148) {
+        refreshChasePath(state, unit, ally.x, ally.y, dt);
+        return;
+      }
+      unit.path = [];
+      unit.facing = ally.x < unit.x ? -1 : 1;
+      if (unit.healClock <= 0) {
+        ally.hp = Math.min(ally.maxHp, ally.hp + 32);
+        unit.healClock = 1.15;
+        addEffect(state, "heal", ally.x, ally.y - 22, 0.72);
+      }
       return;
     }
   }
@@ -1615,7 +2061,7 @@ function updatePlayerCombat(state: GameState, unit: Unit, dt: number) {
       candidate.hp > 0,
   );
   if (!target && !building && unit.action === "attack") {
-    target = nearestEnemy(state, unit, 235);
+    target = priorityEnemyForDefender(state, unit, 250);
     unit.targetUnitId = target?.id;
   }
   if (!target && !building) {
@@ -1809,13 +2255,74 @@ function updateProjectiles(state: GameState, dt: number) {
   state.projectiles = state.projectiles.filter((projectile) => projectile.age < 5);
 }
 
+function resourceRespawnPoint(state: GameState, node: ResourceNode) {
+  const castle = state.buildings.find(
+    (building) => building.team === "player" && building.kind === "castle" && building.hp > 0,
+  );
+  const maxX =
+    state.mode === "endless"
+      ? state.endlessTier * ENDLESS_REGION_WIDTH * TILE - 80
+      : WORLD_W - 180;
+  const activeDens = state.buildings.filter(
+    (building) => building.team === "enemy" && building.hp > 0,
+  );
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const preferCastle = Boolean(castle) && Math.random() < (node.kind === "meat" ? 0.76 : 0.58);
+    let x: number;
+    let y: number;
+    if (preferCastle && castle) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 230 + Math.random() * (node.kind === "meat" ? 370 : 500);
+      x = castle.x + Math.cos(angle) * radius;
+      y = castle.y + Math.sin(angle) * radius * 0.75;
+    } else {
+      x = 100 + Math.random() * Math.max(160, maxX - 100);
+      y = 220 + Math.random() * (WORLD_H - 440);
+    }
+    if (!stateIsWalkable(state, x, y, node.kind === "wood" ? 34 : 24)) continue;
+    if (stateTerrainAtCell(state, Math.floor(x / TILE), Math.floor(y / TILE)) === "bridge") {
+      continue;
+    }
+    const enemyBuffer = node.kind === "meat" ? 330 : 245;
+    if (activeDens.some((building) => distance(x, y, building.x, building.y) < enemyBuffer)) {
+      continue;
+    }
+    if (
+      state.nodes.some(
+        (other) =>
+          other.id !== node.id &&
+          other.amount > 0 &&
+          distance(x, y, other.x, other.y) < (node.kind === "wood" ? 86 : 72),
+      )
+    ) {
+      continue;
+    }
+    if (
+      state.buildings.some(
+        (building) => building.hp > 0 && distance(x, y, building.x, building.y) < 115,
+      )
+    ) {
+      continue;
+    }
+    return { x, y };
+  }
+  return nearestStateWalkablePoint(state, node.x, node.y, 24);
+}
+
 function updateResources(state: GameState, dt: number) {
   for (const node of state.nodes) {
     if (node.amount > 0 || node.respawnClock <= 0) continue;
     node.respawnClock -= dt;
     if (node.respawnClock <= 0) {
+      const spawn = resourceRespawnPoint(state, node);
+      if (spawn) {
+        node.x = spawn.x;
+        node.y = spawn.y;
+      }
       node.amount = node.maxAmount;
-      node.variant = (node.variant + 1) % (node.kind === "wood" ? 4 : 3);
+      node.variant =
+        (node.variant + 1 + Math.floor(Math.random() * 3)) %
+        (node.kind === "wood" ? 4 : node.kind === "gold" ? 6 : 4);
       addEffect(state, node.kind === "meat" ? "splash" : "dust", node.x, node.y, 0.65);
     }
   }
@@ -1849,6 +2356,7 @@ function updateBuildings(state: GameState, dt: number) {
           "player",
           building.x + 84,
           building.y + 32,
+          state.level,
         );
         state.units.push(unit);
         addEffect(state, "dust", unit.x, unit.y, 0.55);
@@ -1885,6 +2393,30 @@ function updateBuildings(state: GameState, dt: number) {
   }
 }
 
+function updateEndlessExpansion(state: GameState, dt: number) {
+  if (state.mode !== "endless" || state.endlessTier >= MAP_COUNT) return;
+  const activeRegion = state.endlessTier - 1;
+  const activeCamps = state.buildings.filter(
+    (building) =>
+      building.team === "enemy" &&
+      Math.floor(building.x / (ENDLESS_REGION_WIDTH * TILE)) === activeRegion,
+  );
+  if (!activeCamps.length || activeCamps.some((building) => building.hp > 0)) {
+    state.endlessExpansionClock = 0;
+    return;
+  }
+  if (state.endlessExpansionClock <= 0) {
+    state.endlessExpansionClock = 3.25;
+    return;
+  }
+  state.endlessExpansionClock -= dt;
+  if (state.endlessExpansionClock > 0) return;
+  state.endlessTier += 1;
+  addEndlessRegionContent(state, state.endlessTier - 1);
+  state.waveClock = Math.max(state.waveClock, 7);
+  state.waveActive = state.units.some((unit) => unit.team === "enemy" && unit.hp > 0);
+}
+
 export function updateGame(state: GameState, dt: number) {
   if (state.outcome !== "playing") return;
   state.time += dt;
@@ -1919,20 +2451,25 @@ export function updateGame(state: GameState, dt: number) {
       if (moveAlongPath(state, unit, dt)) unit.action = unit.kind === "lancer" ? "guard" : "idle";
       continue;
     }
+    if (unit.kind === "monk") {
+      updatePlayerCombat(state, unit, dt);
+      continue;
+    }
     if (unit.action === "attack" || unit.action === "heal" || unit.targetUnitId || unit.targetBuildingId) {
       updatePlayerCombat(state, unit, dt);
       continue;
     }
-    const nearby = nearestEnemy(state, unit, unit.kind === "archer" ? 245 : 135);
+    const localRange =
+      unit.kind === "archer" ? 310 : unit.kind === "lancer" ? 225 : 195;
+    const nearby = priorityEnemyForDefender(state, unit, localRange);
     if (nearby) {
       unit.targetUnitId = nearby.id;
       unit.action = "attack";
-    } else if (unit.kind === "monk") {
-      updatePlayerCombat(state, unit, dt);
     }
   }
 
   updateBuildings(state, dt);
+  updateEndlessExpansion(state, dt);
   updateResources(state, dt);
   updateProjectiles(state, dt);
   for (const effect of state.effects) effect.age += dt;
@@ -1955,7 +2492,9 @@ export function updateGame(state: GameState, dt: number) {
   const castle = state.buildings.find(
     (building) => building.kind === "castle" && building.team === "player",
   );
-  const cave = state.buildings.find((building) => building.kind === "cave");
+  const livingEnemyCamps = state.buildings.some(
+    (building) => building.team === "enemy" && building.hp > 0,
+  );
   if (!castle || castle.hp <= 0) state.outcome = "defeat";
   else if (
     state.mode === "stage" &&
@@ -1963,7 +2502,7 @@ export function updateGame(state: GameState, dt: number) {
     state.bossSpawned &&
     !state.waveActive &&
     livingEnemies === 0 &&
-    (!cave || cave.hp <= 0)
+    !livingEnemyCamps
   ) {
     state.outcome = "victory";
   }
@@ -2009,7 +2548,6 @@ function tileAsset(kind: TerrainKind): AssetKey {
 function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: GameState, camera: Camera) {
   const visibleW = VIEW_W / camera.zoom;
   const visibleH = VIEW_H / camera.zoom;
-  const layout = mapLayout(state.level);
   const firstC = Math.max(0, Math.floor(camera.x / TILE) - 2);
   const lastC = Math.min(COLS - 1, Math.ceil((camera.x + visibleW) / TILE) + 2);
   const firstR = Math.max(0, Math.floor(camera.y / TILE) - 2);
@@ -2021,12 +2559,12 @@ function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: Ga
   }
   for (let r = firstR; r <= lastR; r += 1) {
     for (let c = firstC; c <= lastC; c += 1) {
-      const kind = terrainAtCell(c, r, state.level);
+      const kind = stateTerrainAtCell(state, c, r);
       if (kind === "water" || kind === "bridge" || kind === "hill") continue;
-      const leftWater = terrainAtCell(c - 1, r, state.level) === "water";
-      const rightWater = terrainAtCell(c + 1, r, state.level) === "water";
-      const topWater = terrainAtCell(c, r - 1, state.level) === "water";
-      const bottomWater = terrainAtCell(c, r + 1, state.level) === "water";
+      const leftWater = stateTerrainAtCell(state, c - 1, r) === "water";
+      const rightWater = stateTerrainAtCell(state, c + 1, r) === "water";
+      const topWater = stateTerrainAtCell(state, c, r - 1) === "water";
+      const bottomWater = stateTerrainAtCell(state, c, r + 1) === "water";
       const sx = leftWater ? 0 : rightWater ? 128 : 64;
       const sy = topWater ? 0 : bottomWater ? 128 : 64;
       if (leftWater || rightWater || topWater || bottomWater) {
@@ -2051,13 +2589,66 @@ function drawTerrain(ctx: CanvasRenderingContext2D, images: ImageBank, state: Ga
     }
   }
 
-  for (const hill of layout.hills) {
-    drawElevation(ctx, images, hill.c * TILE, hill.r * TILE, hill.w, hill.h, state.time);
+  if (state.mode === "endless") {
+    for (let region = 0; region < state.endlessTier; region += 1) {
+      const offset = region * ENDLESS_REGION_WIDTH;
+      const layout = ENDLESS_REGION_TEMPLATES[endlessRegionMap(state, region)];
+      for (const hill of layout.hills) {
+        drawElevation(
+          ctx,
+          images,
+          (hill.c + offset) * TILE,
+          hill.r * TILE,
+          hill.w,
+          hill.h,
+          state.time,
+        );
+      }
+      for (const stair of layout.stairs) {
+        drawStairs(ctx, images, {
+          c1: stair.c1 + offset,
+          c2: stair.c2 + offset,
+          r1: stair.r1,
+          r2: stair.r2,
+        });
+      }
+      if (region + 1 < state.endlessTier) {
+        drawBridgeRect(ctx, images, {
+          c1: offset + ENDLESS_REGION_WIDTH - 1,
+          c2: offset + ENDLESS_REGION_WIDTH,
+          r1: 14,
+          r2: 16,
+        });
+      }
+    }
+    drawEndlessZones(ctx, state);
+  } else {
+    const layout = mapLayout(state.level);
+    for (const hill of layout.hills) {
+      drawElevation(ctx, images, hill.c * TILE, hill.r * TILE, hill.w, hill.h, state.time);
+    }
+    for (const bridge of layout.bridges) drawBridgeRect(ctx, images, bridge);
+    for (const stair of layout.stairs) drawStairs(ctx, images, stair);
+    drawWorldPaths(ctx, images, state.level);
+    drawFactionZones(ctx);
   }
-  for (const bridge of layout.bridges) drawBridgeRect(ctx, images, bridge);
-  for (const stair of layout.stairs) drawStairs(ctx, images, stair);
-  drawWorldPaths(ctx, images, state.level);
-  drawFactionZones(ctx);
+}
+
+function drawEndlessZones(ctx: CanvasRenderingContext2D, state: GameState) {
+  ctx.save();
+  ctx.setLineDash([14, 11]);
+  ctx.lineWidth = 3;
+  ctx.font = '900 17px "Segoe UI", sans-serif';
+  ctx.textAlign = "center";
+  for (let region = 0; region < state.endlessTier; region += 1) {
+    const x = region * ENDLESS_REGION_WIDTH * TILE;
+    const mapId = endlessRegionMap(state, region);
+    ctx.strokeStyle = region === 0 ? "rgba(190,238,246,.48)" : "rgba(255,190,135,.38)";
+    ctx.strokeRect(x + 68, 205, ENDLESS_REGION_WIDTH * TILE - 136, WORLD_H - 410);
+    ctx.fillStyle = region === 0 ? "rgba(225,248,248,.78)" : "rgba(255,224,177,.72)";
+    ctx.fillText(`REGION ${region + 1} · MAP ${mapId}`, x + ENDLESS_REGION_WIDTH * TILE / 2, 248);
+  }
+  ctx.restore();
 }
 
 function drawElevation(
@@ -2388,16 +2979,39 @@ function drawResource(
   };
   if (node.kind === "wood") {
     const key = `tree${(node.variant % 4) + 1}` as AssetKey;
-    const image = node.amount > 0 ? images[key] : images.stump1;
-    const scale = node.amount > 0 ? 0.72 : 0.92;
+    const stumpKey = `stump${(node.variant % 4) + 1}` as AssetKey;
+    if (node.amount > 0) {
+      const image = images[key];
+      const frameSize = node.variant % 4 < 2 ? 256 : 192;
+      const scale = frameSize === 256 ? 0.72 : 0.9;
+      const faded = unitOverlapsOccluder(
+        state,
+        node.x,
+        node.y,
+        frameSize * scale * 0.36,
+        frameSize * scale * 0.74,
+      );
+      drawSprite(
+        ctx,
+        image,
+        frameSize,
+        Math.floor(state.time * 3 + node.variant * 2),
+        node.x,
+        node.y,
+        scale,
+        1,
+        faded ? 0.3 : 1,
+      );
+      return;
+    }
+    const image = images[stumpKey];
+    const scale = 0.48;
     const width = image.width * scale;
     const height = image.height * scale;
-    const faded = node.amount > 0 && unitOverlapsOccluder(state, node.x, node.y, 48, height * 0.74);
     ctx.save();
-    ctx.globalAlpha = faded ? 0.3 : 1;
     ctx.drawImage(image, node.x - width / 2, node.y - height * 0.82, width, height);
     ctx.restore();
-    if (node.amount <= 0) drawRespawnMarker();
+    drawRespawnMarker();
     return;
   }
   if (node.kind === "gold") {
@@ -2405,7 +3019,7 @@ function drawResource(
       drawRespawnMarker();
       return;
     }
-    const key = `gold${(node.variant % 3) + 1}` as AssetKey;
+    const key = `gold${(node.variant % 6) + 1}` as AssetKey;
     const image = images[key];
     const scale = 0.82;
     ctx.drawImage(
@@ -2418,7 +3032,6 @@ function drawResource(
     return;
   }
   if (node.amount <= 0) {
-    drawRespawnMarker();
     return;
   }
   drawSprite(
@@ -2464,26 +3077,33 @@ interface Decor {
   frame?: number;
   frameSize?: number;
   occludes?: boolean;
+  maps?: number[];
 }
 
 const DECOR: Decor[] = [
-  { key: "rock1", x: 260, y: 410, w: 64, h: 64 },
-  { key: "rock4", x: 830, y: 760, w: 64, h: 64 },
+  { key: "rock1", x: 260, y: 410, w: 64, h: 64, maps: [1, 2] },
+  { key: "rock4", x: 830, y: 760, w: 64, h: 64, maps: [1, 4] },
   { key: "rock3", x: 1400, y: 1060, w: 64, h: 64 },
   { key: "rock2", x: 2020, y: 1860, w: 64, h: 64 },
   { key: "bush1", x: 310, y: 920, w: 92, h: 92, frameSize: 128, frame: 1, occludes: true },
-  { key: "bush2", x: 1340, y: 480, w: 92, h: 92, frameSize: 128, frame: 5, occludes: true },
+  { key: "bush2", x: 1340, y: 480, w: 92, h: 92, frameSize: 128, frame: 5, occludes: true, maps: [1, 2] },
   { key: "bush1", x: 2050, y: 880, w: 92, h: 92, frameSize: 128, frame: 3, occludes: true },
   { key: "bush2", x: 2400, y: 1470, w: 92, h: 92, frameSize: 128, frame: 2, occludes: true },
-  { key: "deadTree", x: 2820, y: 420, w: 250, h: 210, occludes: true },
-  { key: "bones1", x: 2480, y: 440, w: 64, h: 64 },
-  { key: "bones2", x: 2780, y: 690, w: 64, h: 64 },
-  { key: "bones3", x: 2630, y: 820, w: 64, h: 64 },
-  { key: "skullSpike1", x: 2460, y: 650, w: 64, h: 128, occludes: true },
-  { key: "skullSpike2", x: 2860, y: 850, w: 64, h: 128, occludes: true },
-  { key: "fishHut", x: 2260, y: 350, w: 154, h: 154, frameSize: 192, occludes: true },
-  { key: "pirateTower", x: 2180, y: 520, w: 112, h: 168, occludes: true },
-  { key: "cannon", x: 2300, y: 545, w: 64, h: 64 },
+  { key: "deadTree", x: 2820, y: 420, w: 250, h: 210, occludes: true, maps: [3, 4] },
+  { key: "bones1", x: 2480, y: 440, w: 64, h: 64, maps: [3, 4] },
+  { key: "bones2", x: 2780, y: 690, w: 64, h: 64, maps: [3, 4] },
+  { key: "bones3", x: 2630, y: 820, w: 64, h: 64, maps: [3, 4] },
+  { key: "skullSpike1", x: 2460, y: 650, w: 64, h: 128, occludes: true, maps: [3, 4] },
+  { key: "skullSpike2", x: 2860, y: 850, w: 64, h: 128, occludes: true, maps: [3, 4] },
+  { key: "fishHut", x: 2260, y: 350, w: 154, h: 154, frameSize: 192, occludes: true, maps: [4] },
+  { key: "pirateTower", x: 2180, y: 520, w: 112, h: 168, occludes: true, maps: [4] },
+  { key: "cannon", x: 2300, y: 545, w: 64, h: 64, maps: [4] },
+  { key: "rock2", x: 720, y: 1240, w: 64, h: 64 },
+  { key: "bush2", x: 1010, y: 380, w: 88, h: 88, frameSize: 128, frame: 4, occludes: true },
+  { key: "rock1", x: 1540, y: 360, w: 64, h: 64 },
+  { key: "bush1", x: 1670, y: 1530, w: 90, h: 90, frameSize: 128, frame: 2, occludes: true },
+  { key: "rock4", x: 2240, y: 1020, w: 64, h: 64 },
+  { key: "bush2", x: 2840, y: 1350, w: 88, h: 88, frameSize: 128, frame: 6, occludes: true },
 ];
 
 function drawFenceLine(ctx: CanvasRenderingContext2D, images: ImageBank, x: number, y: number, count: number) {
@@ -2517,7 +3137,8 @@ function drawDecor(ctx: CanvasRenderingContext2D, images: ImageBank, state: Game
   ctx.restore();
 }
 
-function drawSeaDecor(ctx: CanvasRenderingContext2D, images: ImageBank, time: number) {
+function drawSeaDecor(ctx: CanvasRenderingContext2D, images: ImageBank, state: GameState) {
+  const time = state.time;
   const rocks = [
     { key: "waterRock1" as const, x: 104, y: 300, seed: 3 },
     { key: "waterRock2" as const, x: 2920, y: 1180, seed: 9 },
@@ -2528,9 +3149,9 @@ function drawSeaDecor(ctx: CanvasRenderingContext2D, images: ImageBank, time: nu
     drawSprite(ctx, images[rock.key], 64, Math.floor(time * 7 + rock.seed), rock.x, rock.y, 1);
   }
   const clouds = [
-    { key: "cloud1" as const, x: -18, y: 300, w: 205, h: 91, speed: 3 },
-    { key: "cloud2" as const, x: -30, y: 760, w: 220, h: 98, speed: 4 },
-    { key: "cloud3" as const, x: -12, y: 1420, w: 190, h: 84, speed: 2 },
+    { key: "cloud1" as const, x: -155, y: 300, w: 205, h: 91, speed: 3 },
+    { key: "cloud2" as const, x: -170, y: 760, w: 220, h: 98, speed: 4 },
+    { key: "cloud3" as const, x: -140, y: 1420, w: 190, h: 84, speed: 2 },
     { key: "cloud2" as const, x: 2875, y: 470, w: 215, h: 96, speed: 5 },
     { key: "cloud1" as const, x: 2880, y: 1040, w: 205, h: 91, speed: 3 },
     { key: "cloud3" as const, x: 2900, y: 1620, w: 180, h: 80, speed: 4 },
@@ -2539,6 +3160,14 @@ function drawSeaDecor(ctx: CanvasRenderingContext2D, images: ImageBank, time: nu
     { key: "cloud2" as const, x: 1020, y: 1938, w: 220, h: 98, speed: 4 },
     { key: "cloud1" as const, x: 2110, y: 1928, w: 225, h: 100, speed: 3 },
   ];
+  if (state.mode === "endless" && state.endlessTier < MAP_COUNT) {
+    const frontierX = state.endlessTier * ENDLESS_REGION_WIDTH * TILE;
+    clouds.push(
+      { key: "cloud2" as const, x: frontierX + 130, y: 540, w: 220, h: 98, speed: 4 },
+      { key: "cloud1" as const, x: frontierX + 360, y: 980, w: 205, h: 91, speed: 3 },
+      { key: "cloud3" as const, x: frontierX + 160, y: 1460, w: 190, h: 84, speed: 2 },
+    );
+  }
   for (const cloud of clouds) {
     ctx.save();
     ctx.globalAlpha = 0.76;
@@ -2546,6 +3175,20 @@ function drawSeaDecor(ctx: CanvasRenderingContext2D, images: ImageBank, time: nu
     ctx.drawImage(images[cloud.key], cloud.x + drift, cloud.y, cloud.w, cloud.h);
     ctx.restore();
   }
+}
+
+function decorMatchesState(state: GameState, decor: Decor) {
+  if (state.mode === "stage") {
+    return !decor.maps || decor.maps.includes(state.level);
+  }
+  const region = Math.floor(decor.x / (ENDLESS_REGION_WIDTH * TILE));
+  if (region >= state.endlessTier) return false;
+  const mapId = endlessRegionMap(state, region);
+  return (
+    (!decor.maps || decor.maps.includes(mapId)) &&
+    stateTerrainAtCell(state, Math.floor(decor.x / TILE), Math.floor(decor.y / TILE)) !==
+      "water"
+  );
 }
 
 export function renderGame(
@@ -2563,12 +3206,15 @@ export function renderGame(
   ctx.scale(camera.zoom, camera.zoom);
   ctx.translate(-Math.round(camera.x), -Math.round(camera.y));
   drawTerrain(ctx, images, state, camera);
-  drawSeaDecor(ctx, images, state.time);
-  drawFenceLine(ctx, images, 2410, 910, 5);
-  drawFenceLine(ctx, images, 2500, 1190, 4);
+  drawSeaDecor(ctx, images, state);
+  for (const camp of state.buildings) {
+    if (camp.team !== "enemy" || camp.hp <= 0) continue;
+    drawFenceLine(ctx, images, camp.x - 96, camp.y + 18, 3);
+  }
 
   const queue: Array<{ y: number; draw: () => void }> = [];
   for (const decor of DECOR) {
+    if (!decorMatchesState(state, decor)) continue;
     queue.push({ y: decor.y, draw: () => drawDecor(ctx, images, state, decor) });
   }
   for (const node of state.nodes) {
@@ -2607,6 +3253,27 @@ export function renderGame(
   for (const effect of state.effects) drawEffect(ctx, images, effect);
 
   if (state.buildMode && state.hoverBuildX !== undefined && state.hoverBuildY !== undefined) {
+    ctx.save();
+    ctx.setLineDash([14, 10]);
+    ctx.lineWidth = 3;
+    for (const building of state.buildings) {
+      if (building.team !== "player" || building.hp <= 0) continue;
+      const influence =
+        building.kind === "castle"
+          ? 590
+          : building.kind === "house"
+            ? 310
+            : building.kind === "tower"
+              ? 280
+              : 390;
+      ctx.fillStyle = "rgba(103, 196, 176, .055)";
+      ctx.strokeStyle = "rgba(196, 246, 215, .38)";
+      ctx.beginPath();
+      ctx.arc(building.x, building.y, influence, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
     const kind = state.buildMode;
     const valid = placementIsValid(state, state.hoverBuildX, state.hoverBuildY);
     const ghost = createBuilding(-1, kind, "player", state.hoverBuildX, state.hoverBuildY);
@@ -2674,7 +3341,7 @@ export function renderMinimap(
   ctx.fillRect(0, 0, w, h);
   for (let r = 0; r < ROWS; r += 1) {
     for (let c = 0; c < COLS; c += 1) {
-      const terrain = terrainAtCell(c, r, state.level);
+      const terrain = stateTerrainAtCell(state, c, r);
       if (terrain === "water") continue;
       ctx.fillStyle =
         terrain === "bridge"

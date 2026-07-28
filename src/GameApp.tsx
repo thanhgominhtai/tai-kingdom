@@ -88,7 +88,7 @@ const DEFAULT_SETTINGS: Settings = {
   devMode: false,
 };
 
-const SAVE_KEY = "tai-kingdom-campaign-v4";
+const SAVE_KEY = "tai-kingdom-campaign-v5";
 const LOCALE_KEY = "tai-kingdom-locale";
 const SETTINGS_KEY = "tai-kingdom-settings-v3";
 const MAP_UNLOCK_KEY = "tai-kingdom-unlocked-map-v1";
@@ -634,6 +634,8 @@ interface HudSnapshot {
   bossAlive: boolean;
   nestsAlive: number;
   nestsCleared: number;
+  endlessTier: number;
+  endlessExpansionClock: number;
   castleHp: number;
   castleMaxHp: number;
   selectedUnits: UnitKind[];
@@ -665,6 +667,8 @@ function makeSnapshot(state: GameState): HudSnapshot {
       (building) => building.team === "enemy" && building.hp > 0,
     ).length,
     nestsCleared: state.nestsCleared,
+    endlessTier: state.endlessTier,
+    endlessExpansionClock: state.endlessExpansionClock,
     castleHp: Math.ceil(castle?.hp ?? 0),
     castleMaxHp: castle?.maxHp ?? 1500,
     selectedUnits: state.units
@@ -695,6 +699,15 @@ function worldPoint(
     screenX: clientX - rect.left,
     screenY: clientY - rect.top,
   };
+}
+
+function applyCameraZoom(camera: Camera, nextZoom: number) {
+  const centerX = camera.x + VIEW_W / camera.zoom / 2;
+  const centerY = camera.y + VIEW_H / camera.zoom / 2;
+  camera.zoom = Math.max(0.25, Math.min(1.5, nextZoom));
+  camera.x = centerX - VIEW_W / camera.zoom / 2;
+  camera.y = centerY - VIEW_H / camera.zoom / 2;
+  clampCamera(camera);
 }
 
 function nameKey(kind: UnitKind | BuildingKind | ResourceKind): CopyKey {
@@ -1285,11 +1298,18 @@ function GameScene({
       issueCommand(stateRef.current, point.x, point.y);
       refreshHud();
     };
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const step = event.deltaY < 0 ? 0.1 : -0.1;
+      applyCameraZoom(cameraRef.current, cameraRef.current.zoom + step);
+      setZoom(cameraRef.current.zoom);
+    };
 
     canvas.addEventListener("pointerdown", pointerDown);
     canvas.addEventListener("pointermove", pointerMove);
     canvas.addEventListener("pointerup", pointerUp);
     canvas.addEventListener("contextmenu", contextMenu);
+    canvas.addEventListener("wheel", wheel, { passive: false });
     const pointerLeave = () => {
       pointerRef.current.inside = false;
     };
@@ -1311,6 +1331,7 @@ function GameScene({
       canvas.removeEventListener("pointermove", pointerMove);
       canvas.removeEventListener("pointerup", pointerUp);
       canvas.removeEventListener("contextmenu", contextMenu);
+      canvas.removeEventListener("wheel", wheel);
       canvas.removeEventListener("pointerleave", pointerLeave);
       window.removeEventListener("pointermove", viewportPointerMove);
       window.removeEventListener("pointerout", viewportPointerOut);
@@ -1404,15 +1425,9 @@ function GameScene({
     clampCamera(cameraRef.current);
   };
   const handleZoom = (direction: -1 | 1) => {
-    const camera = cameraRef.current;
-    const centerX = camera.x + VIEW_W / camera.zoom / 2;
-    const centerY = camera.y + VIEW_H / camera.zoom / 2;
-    const next = Math.max(0.72, Math.min(1.5, camera.zoom + direction * 0.13));
-    camera.zoom = Number(next.toFixed(2));
-    camera.x = centerX - VIEW_W / camera.zoom / 2;
-    camera.y = centerY - VIEW_H / camera.zoom / 2;
-    clampCamera(camera);
-    setZoom(camera.zoom);
+    const next = Number((cameraRef.current.zoom + direction * 0.1).toFixed(2));
+    applyCameraZoom(cameraRef.current, next);
+    setZoom(cameraRef.current.zoom);
   };
   const toggleGodMode = () => {
     const next = !devGodMode;
@@ -1465,7 +1480,7 @@ function GameScene({
           <small>
             {hud.mode === "stage"
               ? `${t(`map${hud.level}Name` as CopyKey)} · ${t("stageMode")}`
-              : t("endlessMode")}
+              : `${t("endlessMode")} · ${t("region")} ${hud.endlessTier}/${MAP_COUNT}`}
           </small>
           <strong>{waveLabel}</strong>
           <span>
@@ -1579,6 +1594,9 @@ function GameScene({
             {hud.mode === "stage" ? t("stageObjective") : t("endlessObjective")}
             {" · "}
             {t("nests")}: {hud.nestsAlive}
+            {hud.mode === "endless" && hud.endlessExpansionClock > 0
+              ? ` · ${t("expandingFrontier")} ${Math.ceil(hud.endlessExpansionClock)}s`
+              : ""}
           </span>
         </div>
 
@@ -1851,6 +1869,15 @@ export default function GameApp() {
 
   const chooseMode = useCallback((mode: GameMode) => {
     setActiveMode(mode);
+    if (mode === "endless") {
+      localStorage.removeItem(SAVE_KEY);
+      setHasSave(false);
+      setResumeSaved(false);
+      setActiveLevel(1);
+      setRunId((id) => id + 1);
+      setScreen("game");
+      return;
+    }
     setScreen("maps");
   }, []);
 
