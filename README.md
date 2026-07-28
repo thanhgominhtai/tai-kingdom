@@ -1,8 +1,6 @@
 # tai'kingdom
 
-Web game chiến thuật thời gian thực 2D, xây bằng React + TypeScript + Canvas.
-Đồ họa sử dụng Tiny Swords của Pixel Frog.
-
+link game: https://tai-kingdom.vercel.app/
 ## Gameplay hiện có
 
 - Bốn bản đồ thế giới mở 3072×2048 có layout riêng: sông, hồ, cầu chiến
