@@ -1316,6 +1316,36 @@ canvas {
   width: min(238px, 25%);
   padding: 5px;
   gap: 3px;
+  transition: width 150ms ease, padding 150ms ease;
+}
+
+.minimap-frame.collapsed {
+  width: 44px;
+  padding: 3px;
+}
+
+.minimap-toggle {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 2px solid #d8c37e;
+  border-radius: 50%;
+  cursor: pointer;
+  background: rgba(48, 103, 116, 0.94);
+  box-shadow: 0 3px 0 rgba(42, 63, 70, 0.46);
+  color: #fff1ad;
+  font-weight: 900;
+}
+
+.minimap-frame.collapsed .minimap-toggle {
+  position: static;
+  width: 36px;
+  height: 36px;
 }
 
 .minimap-frame canvas {
@@ -1467,7 +1497,9 @@ canvas {
   z-index: 24;
   top: 86px;
   right: 14px;
-  width: min(390px, calc(100vw - 28px));
+  width: min(470px, calc(100vw - 28px));
+  max-height: calc(100dvh - 104px);
+  overflow: auto;
   padding: 18px;
   color: var(--ink);
 }
@@ -1525,6 +1557,133 @@ canvas {
   border-radius: 50%;
   background: #65b459;
   box-shadow: 0 0 0 4px rgba(101, 180, 89, 0.2);
+}
+
+.dev-readout {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin-bottom: 9px;
+}
+
+.dev-readout span {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  border: 2px solid rgba(153, 121, 72, 0.42);
+  border-radius: 4px;
+  background: rgba(255, 245, 202, 0.46);
+  color: #6d6250;
+  font-size: 0.58rem;
+  text-align: center;
+}
+
+.dev-readout b {
+  color: #344f5c;
+  font-size: 0.76rem;
+}
+
+.dev-section {
+  display: grid;
+  gap: 6px;
+  border-top: 2px solid rgba(114, 85, 57, 0.16);
+  padding: 9px 0 2px;
+}
+
+.dev-section > strong,
+.dev-section-heading > strong {
+  color: #6f4f43;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.dev-section > small {
+  color: #756755;
+  font-size: 0.59rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.dev-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dev-section-heading label,
+.dev-phase-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6d6250;
+  font-size: 0.62rem;
+  font-weight: 900;
+}
+
+.dev-panel input {
+  width: 76px;
+  min-height: 31px;
+  border: 2px solid #ab8d5e;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #fff1be;
+  color: #344f5c;
+  font: 800 0.7rem "Segoe UI", sans-serif;
+}
+
+.dev-number-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.dev-number-grid label {
+  display: grid;
+  gap: 3px;
+  color: #6d6250;
+  font-size: 0.58rem;
+  font-weight: 900;
+}
+
+.dev-number-grid input {
+  width: 100%;
+}
+
+.dev-apply,
+.dev-phase-row button {
+  min-height: 35px;
+  border: 3px solid #5f8f78;
+  border-radius: 5px;
+  cursor: pointer;
+  background: linear-gradient(#81c47a, #5a9b61);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.dev-unit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.dev-unit-grid button,
+.dev-phase-row button {
+  min-height: 35px;
+  border: 2px solid #b89b67;
+  border-radius: 5px;
+  cursor: pointer;
+  background: linear-gradient(#f5e6b4, #dbc58d);
+  color: #3d4e5a;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.dev-phase-row {
+  display: grid;
+  grid-template-columns: 1fr 110px;
+  align-items: center;
+  gap: 7px;
 }
 
 .dev-grid {

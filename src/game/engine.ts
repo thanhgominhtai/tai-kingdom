@@ -680,9 +680,16 @@ function nearestWalkablePoint(
   return null;
 }
 
-export function clampCamera(camera: Camera) {
+export function worldWidthForState(state: GameState) {
+  return state.mode === "endless"
+    ? state.endlessTier * ENDLESS_REGION_WIDTH * TILE
+    : WORLD_W;
+}
+
+export function clampCamera(camera: Camera, state?: GameState) {
   camera.zoom = Math.max(0.25, Math.min(1.5, camera.zoom || 1));
-  const maxX = WORLD_W - VIEW_W / camera.zoom;
+  const worldWidth = state ? worldWidthForState(state) : WORLD_W;
+  const maxX = worldWidth - VIEW_W / camera.zoom;
   const maxY = WORLD_H - VIEW_H / camera.zoom;
   camera.x =
     maxX < 0 ? maxX / 2 : Math.max(0, Math.min(maxX, camera.x));
@@ -697,7 +704,7 @@ export function createCamera(state: GameState): Camera {
     y: (castle?.y ?? PLAYER_SPAWN.y) - VIEW_H * 0.62,
     zoom: 1,
   };
-  clampCamera(camera);
+  clampCamera(camera, state);
   return camera;
 }
 
@@ -1109,7 +1116,11 @@ export function createInitialGame(
     resources:
       mode === "endless"
         ? { wood: 260, gold: 185, meat: 190 }
-        : { wood: 190, gold: 140, meat: 155 },
+        : {
+            wood: 190 + (level - 1) * 55,
+            gold: 140 + (level - 1) * 42,
+            meat: 155 + (level - 1) * 48,
+          },
     units: [],
     buildings: [],
     nodes: [],
@@ -1172,9 +1183,24 @@ export function createInitialGame(
       createUnit(12, "warrior", "player", 790, 1670),
       createUnit(13, "lancer", "player", 880, 1690),
     ];
-    if (level >= 2) state.units.push(createUnit(14, "archer", "player", 710, 1750));
-    if (level >= 3) state.units.push(createUnit(15, "monk", "player", 820, 1770));
-    if (level >= 4) state.units.push(createUnit(16, "warrior", "player", 940, 1710));
+    if (level >= 2) {
+      state.units.push(
+        createUnit(14, "pawn", "player", 715, 1610),
+        createUnit(15, "archer", "player", 710, 1750),
+      );
+    }
+    if (level >= 3) {
+      state.units.push(
+        createUnit(16, "warrior", "player", 940, 1710),
+        createUnit(17, "monk", "player", 820, 1770),
+      );
+    }
+    if (level >= 4) {
+      state.units.push(
+        createUnit(18, "lancer", "player", 1010, 1660),
+        createUnit(19, "archer", "player", 980, 1780),
+      );
+    }
     state.nodes = stageResourceLayout(level).map(([kind, x, y, variant], index) =>
       createNode(
         200 + index,
@@ -1340,6 +1366,24 @@ export function devMaxResources(state: GameState) {
   state.resources = { wood: 9999, gold: 9999, meat: 9999 };
 }
 
+export function devSetResources(
+  state: GameState,
+  resources: Record<ResourceKind, number>,
+) {
+  state.resources = {
+    wood: Math.max(0, Math.round(resources.wood)),
+    gold: Math.max(0, Math.round(resources.gold)),
+    meat: Math.max(0, Math.round(resources.meat)),
+  };
+}
+
+export function devAdjustPopulationCap(state: GameState, amount: number) {
+  state.populationCap = Math.max(
+    population(state),
+    Math.min(200, state.populationCap + Math.round(amount)),
+  );
+}
+
 export function devHealAll(state: GameState) {
   for (const unit of state.units) {
     if (unit.team === "player") unit.hp = unit.maxHp;
@@ -1349,24 +1393,84 @@ export function devHealAll(state: GameState) {
   }
 }
 
-export function devSpawnEnemy(state: GameState, kind: EnemyKind) {
+export function devSpawnPlayer(
+  state: GameState,
+  kind: PlayerUnitKind,
+  count = 1,
+) {
   const castle = state.buildings.find(
     (building) => building.kind === "castle" && building.hp > 0,
   );
-  const x = Math.min(WORLD_W - 180, (castle?.x ?? 560) + 650);
-  const y = Math.max(180, (castle?.y ?? 1515) - 250);
-  const safe = nearestWalkableCell(Math.floor(x / TILE), Math.floor(y / TILE), state.level);
-  const unit = createUnit(
-    nextId(state),
-    kind,
-    "enemy",
-    (safe?.c ?? Math.floor(x / TILE)) * TILE + TILE / 2,
-    (safe?.r ?? Math.floor(y / TILE)) * TILE + TILE / 2,
-    state.level,
+  const amount = Math.max(1, Math.min(30, Math.round(count)));
+  for (let index = 0; index < amount; index += 1) {
+    const angle = (index / Math.max(1, amount)) * Math.PI * 2;
+    const radius = 210 + Math.floor(index / 10) * 46;
+    const x = (castle?.x ?? 560) + Math.cos(angle) * radius;
+    const y = (castle?.y ?? 1515) + Math.sin(angle) * radius * 0.85;
+    const safe = nearestStateWalkablePoint(state, x, y, 18);
+    const unit = createUnit(
+      nextId(state),
+      kind,
+      "player",
+      safe?.x ?? x,
+      safe?.y ?? y,
+      state.level,
+    );
+    state.units.push(unit);
+    addEffect(state, "heal", unit.x, unit.y, 0.45);
+  }
+  state.populationCap = Math.max(state.populationCap, population(state));
+}
+
+export function devSpawnEnemy(
+  state: GameState,
+  kind: EnemyKind,
+  count = 1,
+) {
+  const castle = state.buildings.find(
+    (building) => building.kind === "castle" && building.hp > 0,
   );
-  unit.boss = kind === "troll" || kind === "minotaur";
-  state.units.push(unit);
-  addEffect(state, "dust", unit.x, unit.y, 0.55);
+  const amount = Math.max(1, Math.min(40, Math.round(count)));
+  const activeWidth = worldWidthForState(state);
+  for (let index = 0; index < amount; index += 1) {
+    const x = Math.min(
+      activeWidth - 110,
+      (castle?.x ?? 560) + 520 + (index % 5) * 46,
+    );
+    const y = Math.max(
+      180,
+      (castle?.y ?? 1515) - 300 + Math.floor(index / 5) * 52,
+    );
+    const safe = nearestStateWalkablePoint(state, x, y, 18);
+    const unit = createUnit(
+      nextId(state),
+      kind,
+      "enemy",
+      safe?.x ?? x,
+      safe?.y ?? y,
+      state.mode === "endless" ? state.endlessTier : state.level,
+    );
+    unit.boss = kind === "troll" || kind === "minotaur";
+    state.units.push(unit);
+    addEffect(state, "dust", unit.x, unit.y, 0.55);
+  }
+}
+
+export function devClearEnemies(state: GameState) {
+  state.units = state.units.filter((unit) => unit.team === "player");
+  state.waveActive = false;
+  state.waveClock = state.mode === "endless" ? 8 : 12;
+}
+
+export function devSetPhase(state: GameState, phase: number) {
+  const maxPhase =
+    state.mode === "stage" ? state.totalWaves : Math.max(1, state.wave + 20);
+  const target = Math.max(1, Math.min(maxPhase, Math.round(phase)));
+  state.units = state.units.filter((unit) => unit.team === "player");
+  state.wave = target - 1;
+  state.waveActive = false;
+  state.bossSpawned = false;
+  state.waveClock = 0;
 }
 
 export function devNextWave(state: GameState) {
@@ -2995,7 +3099,7 @@ function drawResource(
         ctx,
         image,
         frameSize,
-        Math.floor(state.time * 3 + node.variant * 2),
+        0,
         node.x,
         node.y,
         scale,
@@ -3334,13 +3438,15 @@ export function renderMinimap(
 ) {
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
-  const sx = w / WORLD_W;
+  const mapWorldWidth = worldWidthForState(state);
+  const visibleColumns = Math.ceil(mapWorldWidth / TILE);
+  const sx = w / mapWorldWidth;
   const sy = h / WORLD_H;
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = "#3f9fa5";
   ctx.fillRect(0, 0, w, h);
   for (let r = 0; r < ROWS; r += 1) {
-    for (let c = 0; c < COLS; c += 1) {
+    for (let c = 0; c < visibleColumns; c += 1) {
       const terrain = stateTerrainAtCell(state, c, r);
       if (terrain === "water") continue;
       ctx.fillStyle =
@@ -3367,11 +3473,15 @@ export function renderMinimap(
   }
   ctx.strokeStyle = "#fff4b5";
   ctx.lineWidth = 2;
+  const viewLeft = Math.max(0, camera.x);
+  const viewRight = Math.min(mapWorldWidth, camera.x + VIEW_W / camera.zoom);
+  const viewTop = Math.max(0, camera.y);
+  const viewBottom = Math.min(WORLD_H, camera.y + VIEW_H / camera.zoom);
   ctx.strokeRect(
-    camera.x * sx,
-    camera.y * sy,
-    (VIEW_W / camera.zoom) * sx,
-    (VIEW_H / camera.zoom) * sy,
+    viewLeft * sx,
+    viewTop * sy,
+    Math.max(0, viewRight - viewLeft) * sx,
+    Math.max(0, viewBottom - viewTop) * sy,
   );
 }
 

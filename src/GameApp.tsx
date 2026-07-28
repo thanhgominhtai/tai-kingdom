@@ -16,17 +16,21 @@ import {
   VIEW_H,
   VIEW_W,
   WORLD_H,
-  WORLD_W,
   beginBuild,
   cancelBuild,
   clampCamera,
   createCamera,
   createInitialGame,
   devAddResources,
+  devAdjustPopulationCap,
+  devClearEnemies,
   devHealAll,
   devMaxResources,
   devNextWave,
   devSpawnEnemy,
+  devSpawnPlayer,
+  devSetPhase,
+  devSetResources,
   devWinMap,
   getHoverTarget,
   issueCommand,
@@ -44,6 +48,7 @@ import {
   setDevGodMode,
   trainUnit,
   updateGame,
+  worldWidthForState,
   type Building,
   type BuildingKind,
   type Camera,
@@ -91,7 +96,7 @@ const DEFAULT_SETTINGS: Settings = {
 const SAVE_KEY = "tai-kingdom-campaign-v5";
 const LOCALE_KEY = "tai-kingdom-locale";
 const SETTINGS_KEY = "tai-kingdom-settings-v3";
-const MAP_UNLOCK_KEY = "tai-kingdom-unlocked-map-v1";
+const MAP_UNLOCK_KEY = "tai-kingdom-unlocked-map-v2";
 
 function PaperButton({
   children,
@@ -701,13 +706,13 @@ function worldPoint(
   };
 }
 
-function applyCameraZoom(camera: Camera, nextZoom: number) {
+function applyCameraZoom(camera: Camera, state: GameState, nextZoom: number) {
   const centerX = camera.x + VIEW_W / camera.zoom / 2;
   const centerY = camera.y + VIEW_H / camera.zoom / 2;
   camera.zoom = Math.max(0.25, Math.min(1.5, nextZoom));
   camera.x = centerX - VIEW_W / camera.zoom / 2;
   camera.y = centerY - VIEW_H / camera.zoom / 2;
-  clampCamera(camera);
+  clampCamera(camera, state);
 }
 
 function nameKey(kind: UnitKind | BuildingKind | ResourceKind): CopyKey {
@@ -1000,27 +1005,53 @@ function CommandDeck({
 
 function DevPanel({
   t,
+  hud,
   godMode,
   onGodMode,
   onAddResources,
   onMaxResources,
+  onSetResources,
+  onPopulation,
   onHeal,
-  onSpawn,
+  onSpawnPlayer,
+  onSpawnEnemy,
+  onClearEnemies,
+  onSetPhase,
   onNextWave,
   onWin,
   onClose,
 }: {
   t: ReturnType<typeof translator>;
+  hud: HudSnapshot;
   godMode: boolean;
   onGodMode: () => void;
   onAddResources: () => void;
   onMaxResources: () => void;
+  onSetResources: (resources: Record<ResourceKind, number>) => void;
+  onPopulation: (amount: number) => void;
   onHeal: () => void;
-  onSpawn: (kind: EnemyKind) => void;
+  onSpawnPlayer: (kind: PlayerUnitKind, count: number) => void;
+  onSpawnEnemy: (kind: EnemyKind, count: number) => void;
+  onClearEnemies: () => void;
+  onSetPhase: (phase: number) => void;
   onNextWave: () => void;
   onWin: () => void;
   onClose: () => void;
 }) {
+  const [spawnCount, setSpawnCount] = useState(3);
+  const [phase, setPhase] = useState(Math.max(1, hud.wave || 1));
+  const [resourceValues, setResourceValues] = useState({
+    wood: hud.resources.wood,
+    gold: hud.resources.gold,
+    meat: hud.resources.meat,
+  });
+  const setResourceValue = (kind: ResourceKind, value: number) => {
+    setResourceValues((current) => ({
+      ...current,
+      [kind]: Math.max(0, Math.min(99999, value || 0)),
+    }));
+  };
+
   return (
     <aside className="dev-panel paper-panel" aria-label={t("devPanel")}>
       <header>
@@ -1034,19 +1065,103 @@ function DevPanel({
         <span className="dev-live-dot" />
         {t("devModeActive")}
       </div>
-      <div className="dev-grid">
-        <button className={godMode ? "active" : ""} onClick={onGodMode}>
-          {t("godMode")} · {godMode ? t("on") : t("off")}
-        </button>
-        <button onClick={onHeal}>{t("healAll")}</button>
-        <button onClick={onAddResources}>+500 {t("allResources")}</button>
-        <button onClick={onMaxResources}>9999 {t("allResources")}</button>
-        <button onClick={() => onSpawn("goblin")}>+ Spear Goblin</button>
-        <button onClick={() => onSpawn("minotaur")}>+ Minotaur</button>
-        <button onClick={() => onSpawn("troll")}>+ Troll Boss</button>
-        <button onClick={onNextWave}>{t("nextWaveDev")}</button>
-        <button className="danger" onClick={onWin}>{t("winMapDev")}</button>
+      <div className="dev-readout">
+        <span>{t("wave")}: <b>{hud.wave}/{hud.mode === "stage" ? hud.totalWaves : "∞"}</b></span>
+        <span>{t("region")}: <b>{hud.mode === "endless" ? `${hud.endlessTier}/${MAP_COUNT}` : hud.level}</b></span>
+        <span>{t("population")}: <b>{hud.population}/{hud.populationCap}</b></span>
+        <span>{t("enemiesLeft")}: <b>{hud.enemies}</b></span>
       </div>
+
+      <section className="dev-section">
+        <strong>{t("devQuick")}</strong>
+        <div className="dev-grid">
+          <button className={godMode ? "active" : ""} onClick={onGodMode}>
+            {t("godMode")} · {godMode ? t("on") : t("off")}
+          </button>
+          <button onClick={onHeal}>{t("healAll")}</button>
+          <button onClick={onAddResources}>+500 {t("allResources")}</button>
+          <button onClick={onMaxResources}>9999 {t("allResources")}</button>
+          <button onClick={() => onPopulation(5)}>+5 {t("population")}</button>
+          <button onClick={() => onPopulation(-5)}>−5 {t("population")}</button>
+        </div>
+      </section>
+
+      <section className="dev-section">
+        <strong>{t("devResources")}</strong>
+        <div className="dev-number-grid">
+          {(["wood", "gold", "meat"] as const).map((kind) => (
+            <label key={kind}>
+              <span>{t(kind)}</span>
+              <input
+                type="number"
+                min={0}
+                max={99999}
+                value={resourceValues[kind]}
+                onChange={(event) => setResourceValue(kind, Number(event.target.value))}
+              />
+            </label>
+          ))}
+        </div>
+        <button className="dev-apply" onClick={() => onSetResources(resourceValues)}>
+          {t("apply")}
+        </button>
+      </section>
+
+      <section className="dev-section">
+        <div className="dev-section-heading">
+          <strong>{t("devArmy")}</strong>
+          <label>
+            {t("spawnCount")}
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={spawnCount}
+              onChange={(event) =>
+                setSpawnCount(Math.max(1, Math.min(30, Number(event.target.value) || 1)))
+              }
+            />
+          </label>
+        </div>
+        <small>{t("friendly")}</small>
+        <div className="dev-unit-grid">
+          {(["pawn", "warrior", "lancer", "archer", "monk"] as const).map((kind) => (
+            <button key={kind} onClick={() => onSpawnPlayer(kind, spawnCount)}>
+              +{spawnCount} {t(kind)}
+            </button>
+          ))}
+        </div>
+        <small>{t("enemy")}</small>
+        <div className="dev-unit-grid">
+          {(["goblin", "gnoll", "minotaur", "troll"] as const).map((kind) => (
+            <button key={kind} onClick={() => onSpawnEnemy(kind, spawnCount)}>
+              +{spawnCount} {t(kind)}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="dev-section">
+        <strong>{t("devScenario")}</strong>
+        <div className="dev-phase-row">
+          <label>
+            {t("setPhase")}
+            <input
+              type="number"
+              min={1}
+              max={hud.mode === "stage" ? hud.totalWaves : 99}
+              value={phase}
+              onChange={(event) => setPhase(Math.max(1, Number(event.target.value) || 1))}
+            />
+          </label>
+          <button onClick={() => onSetPhase(phase)}>{t("apply")}</button>
+        </div>
+        <div className="dev-grid">
+          <button onClick={onNextWave}>{t("nextWaveDev")}</button>
+          <button onClick={onClearEnemies}>{t("clearEnemies")}</button>
+          <button className="danger" onClick={onWin}>{t("winMapDev")}</button>
+        </div>
+      </section>
       <small>{t("devHint")}</small>
     </aside>
   );
@@ -1103,6 +1218,7 @@ function GameScene({
   const [zoom, setZoom] = useState(1);
   const [devPanelOpen, setDevPanelOpen] = useState(false);
   const [devGodMode, setDevGodModeState] = useState(false);
+  const [minimapCollapsed, setMinimapCollapsed] = useState(false);
   const [hover, setHover] = useState<{
     target: HoverTarget;
     x: number;
@@ -1166,7 +1282,7 @@ function GameScene({
         const length = Math.hypot(panX, panY);
         cameraRef.current.x += (panX / length) * 760 * dt;
         cameraRef.current.y += (panY / length) * 760 * dt;
-        clampCamera(cameraRef.current);
+        clampCamera(cameraRef.current, stateRef.current);
         if (stateRef.current.tutorialStep === 6) {
           stateRef.current.tutorialStep = 7;
         }
@@ -1176,6 +1292,7 @@ function GameScene({
           updateGame(stateRef.current, dt);
         }
       }
+      clampCamera(cameraRef.current, stateRef.current);
       renderGame(
         ctx,
         imagesRef.current!,
@@ -1301,7 +1418,11 @@ function GameScene({
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
       const step = event.deltaY < 0 ? 0.1 : -0.1;
-      applyCameraZoom(cameraRef.current, cameraRef.current.zoom + step);
+      applyCameraZoom(
+        cameraRef.current,
+        stateRef.current,
+        cameraRef.current.zoom + step,
+      );
       setZoom(cameraRef.current.zoom);
     };
 
@@ -1422,11 +1543,11 @@ function GameScene({
   const panCamera = (dx: number, dy: number) => {
     cameraRef.current.x += dx / cameraRef.current.zoom;
     cameraRef.current.y += dy / cameraRef.current.zoom;
-    clampCamera(cameraRef.current);
+    clampCamera(cameraRef.current, stateRef.current);
   };
   const handleZoom = (direction: -1 | 1) => {
     const next = Number((cameraRef.current.zoom + direction * 0.1).toFixed(2));
-    applyCameraZoom(cameraRef.current, next);
+    applyCameraZoom(cameraRef.current, stateRef.current, next);
     setZoom(cameraRef.current.zoom);
   };
   const toggleGodMode = () => {
@@ -1548,24 +1669,39 @@ function GameScene({
           <button className="camera-left" onClick={() => panCamera(-360, 0)}>◀</button>
         </nav>
 
-        <div className="minimap-frame paper-chip">
-          <canvas
-            ref={minimapRef}
-            width={240}
-            height={160}
-            aria-label={t("worldMap")}
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              cameraRef.current.x =
-                ((event.clientX - rect.left) / rect.width) * WORLD_W -
-                VIEW_W / cameraRef.current.zoom / 2;
-              cameraRef.current.y =
-                ((event.clientY - rect.top) / rect.height) * WORLD_H -
-                VIEW_H / cameraRef.current.zoom / 2;
-              clampCamera(cameraRef.current);
-            }}
-          />
-          <span>{t("worldMap")} · {t("clickToMoveCamera")}</span>
+        <div
+          className={`minimap-frame paper-chip ${minimapCollapsed ? "collapsed" : ""}`}
+        >
+          <button
+            className="minimap-toggle"
+            onClick={() => setMinimapCollapsed((collapsed) => !collapsed)}
+            aria-label={t(minimapCollapsed ? "showMap" : "hideMap")}
+            data-tip={t(minimapCollapsed ? "showMap" : "hideMap")}
+          >
+            {minimapCollapsed ? "M" : "−"}
+          </button>
+          {!minimapCollapsed && (
+            <>
+              <canvas
+                ref={minimapRef}
+                width={240}
+                height={160}
+                aria-label={t("worldMap")}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  cameraRef.current.x =
+                    ((event.clientX - rect.left) / rect.width) *
+                      worldWidthForState(stateRef.current) -
+                    VIEW_W / cameraRef.current.zoom / 2;
+                  cameraRef.current.y =
+                    ((event.clientY - rect.top) / rect.height) * WORLD_H -
+                    VIEW_H / cameraRef.current.zoom / 2;
+                  clampCamera(cameraRef.current, stateRef.current);
+                }}
+              />
+              <span>{t("worldMap")} · {t("clickToMoveCamera")}</span>
+            </>
+          )}
         </div>
 
         <div className="castle-vitals paper-chip">
@@ -1672,12 +1808,28 @@ function GameScene({
         {settings.devMode && devPanelOpen && (
           <DevPanel
             t={t}
+            hud={hud}
             godMode={devGodMode}
             onGodMode={toggleGodMode}
             onAddResources={() => runDevAction((state) => devAddResources(state, 500))}
             onMaxResources={() => runDevAction(devMaxResources)}
+            onSetResources={(resources) =>
+              runDevAction((state) => devSetResources(state, resources))
+            }
+            onPopulation={(amount) =>
+              runDevAction((state) => devAdjustPopulationCap(state, amount))
+            }
             onHeal={() => runDevAction(devHealAll)}
-            onSpawn={(kind) => runDevAction((state) => devSpawnEnemy(state, kind))}
+            onSpawnPlayer={(kind, count) =>
+              runDevAction((state) => devSpawnPlayer(state, kind, count))
+            }
+            onSpawnEnemy={(kind, count) =>
+              runDevAction((state) => devSpawnEnemy(state, kind, count))
+            }
+            onClearEnemies={() => runDevAction(devClearEnemies)}
+            onSetPhase={(phase) =>
+              runDevAction((state) => devSetPhase(state, phase))
+            }
             onNextWave={() => runDevAction(devNextWave)}
             onWin={() => runDevAction(devWinMap)}
             onClose={() => setDevPanelOpen(false)}
@@ -1944,7 +2096,11 @@ export default function GameApp() {
         }}
         onOutcome={(outcome) => {
           setHasSave(false);
-          if (outcome === "victory" && activeMode === "stage") {
+          if (
+            outcome === "victory" &&
+            activeMode === "stage" &&
+            !settings.devMode
+          ) {
             const nextUnlocked = Math.min(MAP_COUNT, activeLevel + 1);
             setUnlockedMap((current) => {
               const next = Math.max(current, nextUnlocked);
