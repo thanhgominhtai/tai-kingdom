@@ -24,6 +24,7 @@ import {
   devAddResources,
   devAdjustPopulationCap,
   devClearEnemies,
+  devClearPlayerArmy,
   devHealAll,
   devMaxResources,
   devNextWave,
@@ -69,6 +70,7 @@ import {
 type Screen =
   | "language"
   | "menu"
+  | "resetConfirm"
   | "modes"
   | "maps"
   | "how"
@@ -95,6 +97,7 @@ const SAVE_KEY = "tai-kingdom-campaign-v6";
 const LOCALE_KEY = "tai-kingdom-locale";
 const SETTINGS_KEY = "tai-kingdom-settings-v4";
 const MAP_UNLOCK_KEY = "tai-kingdom-unlocked-map-v2";
+const CAMPAIGN_STARTED_KEY = "tai-kingdom-campaign-started-v1";
 
 function PaperButton({
   children,
@@ -356,6 +359,38 @@ function ModeScreen({
         <div className="panel-footer">
           <PaperButton onClick={onBack}>{t("back")}</PaperButton>
         </div>
+      </section>
+    </main>
+  );
+}
+
+function ResetProgressScreen({
+  locale,
+  onConfirm,
+  onCancel,
+}: {
+  locale: Locale;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const t = translator(locale);
+  return (
+    <main className="storybook-screen modal-screen">
+      <MenuWorld />
+      <div className="screen-vignette" />
+      <section
+        className="paper-panel result-panel"
+        role="alertdialog"
+        aria-labelledby="reset-progress-title"
+        aria-describedby="reset-progress-description"
+      >
+        <RibbonTitle>{t("resetProgressTitle")}</RibbonTitle>
+        <h2 id="reset-progress-title">{t("resetProgressQuestion")}</h2>
+        <p id="reset-progress-description">{t("resetProgressDescription")}</p>
+        <PaperButton tone="red" onClick={onConfirm}>
+          {t("resetProgressConfirm")}
+        </PaperButton>
+        <PaperButton onClick={onCancel}>{t("keepProgress")}</PaperButton>
       </section>
     </main>
   );
@@ -893,7 +928,7 @@ function CommandDeck({
           {building.queue ? (
             <div className="training-readout">
               <strong>
-                {t("queued")}: {t(building.queue.kind)}
+                {t("queued")}: {t(building.queue.kind)} ×2
               </strong>
               <div>
                 <i
@@ -914,7 +949,7 @@ function CommandDeck({
               <CommandButton
                 key={kind}
                 image={unitImages[kind]}
-                title={t(kind)}
+                title={`${t(kind)} ×2`}
                 description={t(descriptions[kind])}
                 cost={UNIT_COST[kind]}
                 onClick={() => onTrain(kind)}
@@ -1018,6 +1053,7 @@ function DevPanel({
   onHeal,
   onSpawnPlayer,
   onSpawnEnemy,
+  onClearPlayerArmy,
   onClearEnemies,
   onSetPhase,
   onNextWave,
@@ -1035,6 +1071,7 @@ function DevPanel({
   onHeal: () => void;
   onSpawnPlayer: (kind: PlayerUnitKind, count: number) => void;
   onSpawnEnemy: (kind: EnemyKind, count: number) => void;
+  onClearPlayerArmy: () => void;
   onClearEnemies: () => void;
   onSetPhase: (phase: number) => void;
   onNextWave: () => void;
@@ -1133,6 +1170,11 @@ function DevPanel({
               +{spawnCount} {t(kind)}
             </button>
           ))}
+        </div>
+        <div className="dev-grid">
+          <button className="danger" onClick={onClearPlayerArmy}>
+            {t("clearPlayerArmy")}
+          </button>
         </div>
         <small>{t("enemy")}</small>
         <div className="dev-unit-grid">
@@ -1835,6 +1877,7 @@ function GameScene({
             onSpawnEnemy={(kind, count) =>
               runDevAction((state) => devSpawnEnemy(state, kind, count))
             }
+            onClearPlayerArmy={() => runDevAction(devClearPlayerArmy)}
             onClearEnemies={() => runDevAction(devClearEnemies)}
             onSetPhase={(phase) =>
               runDevAction((state) => devSetPhase(state, phase))
@@ -2005,9 +2048,26 @@ export default function GameApp() {
     setSettingsState(next);
   }, []);
 
-  const newGame = useCallback(() => {
+  const resetCampaign = useCallback(() => {
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(MAP_UNLOCK_KEY);
+    setHasSave(false);
+    setResumeSaved(false);
+    setUnlockedMap(1);
+    setActiveMode("stage");
+    setActiveLevel(1);
+    setRunId((id) => id + 1);
     setScreen("modes");
   }, []);
+
+  const newGame = useCallback(() => {
+    const hasStarted = localStorage.getItem(CAMPAIGN_STARTED_KEY) === "1";
+    if (hasSave || unlockedMap > 1 || hasStarted) {
+      setScreen("resetConfirm");
+      return;
+    }
+    resetCampaign();
+  }, [hasSave, resetCampaign, unlockedMap]);
 
   const continueGame = useCallback(() => {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -2031,6 +2091,7 @@ export default function GameApp() {
   const chooseMode = useCallback((mode: GameMode) => {
     setActiveMode(mode);
     if (mode === "endless") {
+      localStorage.setItem(CAMPAIGN_STARTED_KEY, "1");
       localStorage.removeItem(SAVE_KEY);
       setHasSave(false);
       setResumeSaved(false);
@@ -2043,6 +2104,7 @@ export default function GameApp() {
   }, []);
 
   const startMap = useCallback((level: number) => {
+    localStorage.setItem(CAMPAIGN_STARTED_KEY, "1");
     localStorage.removeItem(SAVE_KEY);
     setHasSave(false);
     setResumeSaved(false);
@@ -2057,6 +2119,15 @@ export default function GameApp() {
 
   if (screen === "how") {
     return <HowScreen locale={locale} onBack={() => setScreen("menu")} />;
+  }
+  if (screen === "resetConfirm") {
+    return (
+      <ResetProgressScreen
+        locale={locale}
+        onConfirm={resetCampaign}
+        onCancel={() => setScreen("menu")}
+      />
+    );
   }
   if (screen === "modes") {
     return (

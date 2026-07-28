@@ -447,7 +447,7 @@ const STAGE_CAMPS: Record<number, CampLayout[]> = {
     { kind: "cave", x: 1640, y: 350 },
     { kind: "goblinHouse", x: 2660, y: 480 },
     { kind: "goblinTower", x: 1740, y: 1740 },
-    { kind: "rootTree", x: 2740, y: 1710 },
+    { kind: "rootTree", x: 2592, y: 1440 },
   ],
   3: [
     { kind: "cave", x: 1640, y: 340 },
@@ -1184,6 +1184,7 @@ function stageResourceLayout(level: number) {
 
 function addEndlessRegionContent(state: GameState, region: number, initial = false) {
   const baseX = region * ENDLESS_REGION_WIDTH * TILE;
+  const mapId = endlessRegionMap(state, region);
   const campSlots = [
     { x: 570, y: 350 },
     { x: 245, y: 760 },
@@ -1199,10 +1200,14 @@ function addEndlessRegionContent(state: GameState, region: number, initial = fal
     "rootTree",
   ];
   for (let index = 0; index < count; index += 1) {
-    const slot = campSlots[(index + region) % campSlots.length];
+    const kind = campKinds[(index + region) % campKinds.length];
+    const slot =
+      mapId === 2 && kind === "rootTree"
+        ? { x: 544, y: 416 }
+        : campSlots[(index + region) % campSlots.length];
     const camp = createBuilding(
       nextId(state),
-      campKinds[(index + region) % campKinds.length],
+      kind,
       "enemy",
       baseX + slot.x,
       slot.y,
@@ -1423,6 +1428,9 @@ export function restoreGame(raw: string | null, tutorialEnabled = true) {
     parsed.projectiles ??= [];
     parsed.effects ??= [];
     parsed.devGodMode = false;
+    parsed.buildings.forEach((building) => {
+      if (building.team === "enemy") building.respawnClock = 0;
+    });
     parsed.endlessTier ??= 1;
     parsed.endlessRegionOrder ??= [1, 2, 3, 4];
     parsed.endlessExpansionClock ??= 0;
@@ -1627,6 +1635,27 @@ export function devClearEnemies(state: GameState) {
   state.waveClock = state.mode === "endless" ? 8 : 12;
 }
 
+export function devClearPlayerArmy(state: GameState) {
+  const removedIds = new Set(
+    state.units
+      .filter((unit) => unit.team === "player" && unit.kind !== "pawn")
+      .map((unit) => unit.id),
+  );
+  state.units = state.units.filter(
+    (unit) => unit.team !== "player" || unit.kind === "pawn",
+  );
+  state.selectedUnitIds = state.selectedUnitIds.filter((id) => !removedIds.has(id));
+  state.projectiles = state.projectiles.filter(
+    (projectile) => !removedIds.has(projectile.targetId),
+  );
+  for (const enemy of state.units) {
+    if (enemy.team === "enemy" && enemy.targetUnitId && removedIds.has(enemy.targetUnitId)) {
+      enemy.targetUnitId = undefined;
+      enemy.path = [];
+    }
+  }
+}
+
 export function devSetPhase(state: GameState, phase: number) {
   const maxPhase =
     state.mode === "stage" ? state.totalWaves : Math.max(1, state.wave + 20);
@@ -1751,7 +1780,7 @@ export function placeBuilding(state: GameState, x: number, y: number) {
 }
 
 export function trainUnit(state: GameState, kind: PlayerUnitKind) {
-  if (population(state) >= state.populationCap) {
+  if (population(state) + 2 > state.populationCap) {
     setNotice(state, "insufficient");
     return false;
   }
@@ -2028,9 +2057,6 @@ function damageBuilding(state: GameState, building: Building, amount: number) {
       state.nestsCleared += 1;
       state.resources.wood += 45;
       state.resources.gold += 35;
-      if (state.mode === "endless" && state.endlessTier >= MAP_COUNT) {
-        building.respawnClock = 55 + Math.random() * 15;
-      }
     }
   }
 }
@@ -2385,14 +2411,15 @@ function chooseEnemyTarget(state: GameState, unit: Unit) {
   const candidates = state.units.filter(
     (candidate) =>
       candidate.team === "player" &&
+      candidate.kind !== "pawn" &&
       candidate.hp > 0 &&
-      distance(unit.x, unit.y, candidate.x, candidate.y) < 250,
+      distance(unit.x, unit.y, candidate.x, candidate.y) < 520,
   );
   const nearby =
     unit.kind === "thief"
       ? candidates.sort((a, b) => {
           const priority = (kind: UnitKind) =>
-            kind === "monk" ? 0 : kind === "archer" ? 1 : kind === "pawn" ? 2 : 3;
+            kind === "monk" ? 0 : kind === "archer" ? 1 : 2;
           return priority(a.kind) - priority(b.kind);
         })[0]
       : candidates.sort(
@@ -2420,6 +2447,7 @@ function trollImpact(state: GameState, unit: Unit, target?: Unit, building?: Bui
   const victims = state.units.filter(
     (candidate) =>
       candidate.team === "player" &&
+      candidate.kind !== "pawn" &&
       candidate.hp > 0 &&
       distance(unit.x, unit.y, candidate.x, candidate.y) < 112,
   );
@@ -2427,7 +2455,9 @@ function trollImpact(state: GameState, unit: Unit, target?: Unit, building?: Bui
   if (building && distance(unit.x, unit.y, building.x, building.y) < 125) {
     damageBuilding(state, building, UNIT_SPEC.troll.damage);
   }
-  if (target && !victims.includes(target)) damageUnit(state, target, UNIT_SPEC.troll.damage);
+  if (target && target.kind !== "pawn" && !victims.includes(target)) {
+    damageUnit(state, target, UNIT_SPEC.troll.damage);
+  }
   addEffect(state, "explosion", unit.x + unit.facing * 46, unit.y - 18, 0.75);
 }
 
@@ -2436,6 +2466,7 @@ function updateEnemy(state: GameState, unit: Unit, dt: number) {
     (candidate) =>
       candidate.id === unit.targetUnitId &&
       candidate.team === "player" &&
+      candidate.kind !== "pawn" &&
       candidate.hp > 0,
   );
   let building = state.buildings.find(
@@ -2444,6 +2475,28 @@ function updateEnemy(state: GameState, unit: Unit, dt: number) {
       candidate.team === "player" &&
       candidate.hp > 0,
   );
+  if (building) {
+    const defender = state.units
+      .filter(
+        (candidate) =>
+          candidate.team === "player" &&
+          candidate.kind !== "pawn" &&
+          candidate.hp > 0 &&
+          distance(unit.x, unit.y, candidate.x, candidate.y) < 520,
+      )
+      .sort(
+        (a, b) =>
+          distance(unit.x, unit.y, a.x, a.y) -
+          distance(unit.x, unit.y, b.x, b.y),
+      )[0];
+    if (defender) {
+      target = defender;
+      building = undefined;
+      unit.targetUnitId = defender.id;
+      unit.targetBuildingId = undefined;
+      unit.path = [];
+    }
+  }
   if (!target && !building) {
     chooseEnemyTarget(state, unit);
     target = state.units.find((candidate) => candidate.id === unit.targetUnitId);
@@ -2512,6 +2565,7 @@ function updateProjectiles(state: GameState, dt: number) {
       (unit) =>
         unit.id === projectile.targetId &&
         unit.team !== projectile.team &&
+        !(projectile.team === "enemy" && unit.kind === "pawn") &&
         unit.hp > 0,
     );
     if (!target) {
@@ -2610,14 +2664,6 @@ function updateResources(state: GameState, dt: number) {
 function updateBuildings(state: GameState, dt: number) {
   for (const building of state.buildings) {
     if (building.hp <= 0) {
-      if (state.mode === "endless" && building.team === "enemy" && building.respawnClock > 0) {
-        building.respawnClock -= dt;
-        if (building.respawnClock <= 0) {
-          building.hp = building.maxHp;
-          building.cleared = false;
-          addEffect(state, "fire", building.x, building.y - 45, 0.9);
-        }
-      }
       continue;
     }
     building.attackClock = Math.max(0, building.attackClock - dt);
@@ -2629,16 +2675,25 @@ function updateBuildings(state: GameState, dt: number) {
     if (building.queue) {
       building.queue.remaining -= dt;
       if (building.queue.remaining <= 0) {
-        const unit = createUnit(
-          nextId(state),
-          building.queue.kind,
-          "player",
-          building.x + 84,
-          building.y + 32,
-          state.level,
-        );
-        state.units.push(unit);
-        addEffect(state, "dust", unit.x, unit.y, 0.55);
+        for (let index = 0; index < 2; index += 1) {
+          const offsetY = index === 0 ? -24 : 38;
+          const spawn = nearestStateWalkablePoint(
+            state,
+            building.x + 84,
+            building.y + offsetY,
+            18,
+          );
+          const unit = createUnit(
+            nextId(state),
+            building.queue.kind,
+            "player",
+            spawn?.x ?? building.x + 84,
+            spawn?.y ?? building.y + offsetY,
+            state.level,
+          );
+          state.units.push(unit);
+          addEffect(state, "dust", unit.x, unit.y, 0.55);
+        }
         building.queue = undefined;
       }
     }
@@ -2673,7 +2728,7 @@ function updateBuildings(state: GameState, dt: number) {
 }
 
 function updateEndlessExpansion(state: GameState, dt: number) {
-  if (state.mode !== "endless" || state.endlessTier >= MAP_COUNT) return;
+  if (state.mode !== "endless") return;
   const activeRegion = state.endlessTier - 1;
   const activeCamps = state.buildings.filter(
     (building) =>
@@ -2690,6 +2745,18 @@ function updateEndlessExpansion(state: GameState, dt: number) {
   }
   state.endlessExpansionClock -= dt;
   if (state.endlessExpansionClock > 0) return;
+  state.buildings = state.buildings.filter(
+    (building) =>
+      !(
+        building.team === "enemy" &&
+        building.hp <= 0 &&
+        Math.floor(building.x / (ENDLESS_REGION_WIDTH * TILE)) === activeRegion
+      ),
+  );
+  if (state.endlessTier >= MAP_COUNT) {
+    state.endlessExpansionClock = 0;
+    return;
+  }
   state.endlessTier += 1;
   addEndlessRegionContent(state, state.endlessTier - 1);
   state.waveClock = Math.max(state.waveClock, 7);
