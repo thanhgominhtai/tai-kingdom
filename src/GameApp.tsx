@@ -294,14 +294,14 @@ function MenuScreen({
           <p>{t("missionDesc")}</p>
           <div className="mission-summary">
             <span>
-              <img src="/game-assets/ui/wood.png" alt="" /> 4 {t("wave")}
+              <img src="./game-assets/ui/wood.png" alt="" /> 4 {t("wave")}
             </span>
             <span>
-              <SpritePreview src="/game-assets/units/warrior-idle.png" /> 5{" "}
+              <SpritePreview src="./game-assets/units/warrior-idle.png" /> 5{" "}
               {t("units")}
             </span>
             <span>
-              <SpritePreview src="/game-assets/enemies/cave.png" /> Root Den
+              <SpritePreview src="./game-assets/enemies/cave.png" /> Root Den
             </span>
           </div>
           <PaperButton tone="red" onClick={onNewGame}>
@@ -333,8 +333,8 @@ function ModeScreen({
         <div className="mode-grid">
           <button className="mode-card stage-card" onClick={() => onChoose("stage")}>
             <span className="mode-art">
-              <img src="/game-assets/buildings/castle.png" alt="" />
-              <SpritePreview src="/game-assets/enemies/troll-idle.png" />
+              <img src="./game-assets/buildings/castle.png" alt="" />
+              <SpritePreview src="./game-assets/enemies/troll-idle.png" />
             </span>
             <span className="mode-copy">
               <small>{t("recommended")}</small>
@@ -345,8 +345,8 @@ function ModeScreen({
           </button>
           <button className="mode-card endless-card" onClick={() => onChoose("endless")}>
             <span className="mode-art">
-              <img src="/game-assets/buildings/tower.png" alt="" />
-              <SpritePreview src="/game-assets/units/pawn-idle.png" />
+              <img src="./game-assets/buildings/tower.png" alt="" />
+              <SpritePreview src="./game-assets/units/pawn-idle.png" />
             </span>
             <span className="mode-copy">
               <small>{t("survival")}</small>
@@ -486,37 +486,37 @@ function HowScreen({
     {
       title: t("howSelectTitle"),
       text: t("howSelectText"),
-      image: "/game-assets/units/pawn-idle.png",
+      image: "./game-assets/units/pawn-idle.png",
       sprite: true,
     },
     {
       title: t("howSmartTitle"),
       text: t("howSmartText"),
-      image: "/game-assets/ui/cursor.png",
+      image: "./game-assets/ui/cursor.png",
       sprite: false,
     },
     {
       title: t("howEconomyTitle"),
       text: t("howEconomyText"),
-      image: "/game-assets/resources/tree2.png",
+      image: "./game-assets/resources/tree2.png",
       sprite: false,
     },
     {
       title: t("howWorldTitle"),
       text: t("howWorldText"),
-      image: "/game-assets/terrain/bridge-all.png",
+      image: "./game-assets/terrain/bridge-all.png",
       sprite: false,
     },
     {
       title: t("howArmyTitle"),
       text: t("howArmyText"),
-      image: "/game-assets/buildings/barracks.png",
+      image: "./game-assets/buildings/barracks.png",
       sprite: false,
     },
     {
       title: t("howWinTitle"),
       text: t("howWinText"),
-      image: "/game-assets/enemies/cave.png",
+      image: "./game-assets/enemies/cave.png",
       sprite: true,
     },
   ];
@@ -788,7 +788,7 @@ function ResourceHud({
 }) {
   return (
     <div className="resource-hud" data-tip={label}>
-      <img src={`/game-assets/ui/${kind}.png`} alt="" />
+      <img src={`./game-assets/ui/${kind}.png`} alt="" />
       <span>
         <small>{label}</small>
         <strong>{Math.floor(value)}</strong>
@@ -808,7 +808,7 @@ function CostLine({
         .filter((kind) => cost[kind] > 0)
         .map((kind) => (
           <i key={kind}>
-            <img src={`/game-assets/ui/${kind}.png`} alt="" />
+            <img src={`./game-assets/ui/${kind}.png`} alt="" />
             {cost[kind]}
           </i>
         ))}
@@ -879,11 +879,11 @@ function CommandDeck({
             : [];
 
   const unitImages: Record<PlayerUnitKind, string> = {
-    pawn: "/game-assets/units/pawn-idle.png",
-    warrior: "/game-assets/units/warrior-idle.png",
-    lancer: "/game-assets/units/lancer-idle.png",
-    archer: "/game-assets/units/archer-idle.png",
-    monk: "/game-assets/units/monk-idle.png",
+    pawn: "./game-assets/units/pawn-idle.png",
+    warrior: "./game-assets/units/warrior-idle.png",
+    lancer: "./game-assets/units/lancer-idle.png",
+    archer: "./game-assets/units/archer-idle.png",
+    monk: "./game-assets/units/monk-idle.png",
   };
   const descriptions: Record<PlayerUnitKind, CopyKey> = {
     pawn: "gatherer",
@@ -893,16 +893,16 @@ function CommandDeck({
     monk: "healer",
   };
   const buildingImages: Record<BuildingKind, string> = {
-    castle: "/game-assets/buildings/castle.png",
-    house: "/game-assets/buildings/house1.png",
-    barracks: "/game-assets/buildings/barracks.png",
-    archery: "/game-assets/buildings/archery.png",
-    monastery: "/game-assets/buildings/monastery.png",
-    tower: "/game-assets/buildings/tower.png",
-    cave: "/game-assets/enemies/cave.png",
-    goblinHouse: "/game-assets/enemies/goblin-house.png",
-    goblinTower: "/game-assets/enemies/goblin-tower.png",
-    rootTree: "/game-assets/decor/dead-tree.png",
+    castle: "./game-assets/buildings/castle.png",
+    house: "./game-assets/buildings/house1.png",
+    barracks: "./game-assets/buildings/barracks.png",
+    archery: "./game-assets/buildings/archery.png",
+    monastery: "./game-assets/buildings/monastery.png",
+    tower: "./game-assets/buildings/tower.png",
+    cave: "./game-assets/enemies/cave.png",
+    goblinHouse: "./game-assets/enemies/goblin-house.png",
+    goblinTower: "./game-assets/enemies/goblin-tower.png",
+    rootTree: "./game-assets/decor/dead-tree.png",
   };
 
   if (building) {
@@ -977,7 +977,7 @@ function CommandDeck({
             {unique.slice(0, 2).map((kind) => (
               <SpritePreview
                 key={kind}
-                src={`/game-assets/units/${kind}-idle.png`}
+                src={`./game-assets/units/${kind}-idle.png`}
               />
             ))}
           </span>
@@ -993,21 +993,21 @@ function CommandDeck({
           {pawnSelected ? (
             <>
               <CommandButton
-                image="/game-assets/buildings/house1.png"
+                image="./game-assets/buildings/house1.png"
                 title={t("house")}
                 description={t("houseDesc")}
                 cost={BUILD_COST.house}
                 onClick={() => onBuild("house")}
               />
               <CommandButton
-                image="/game-assets/buildings/tower.png"
+                image="./game-assets/buildings/tower.png"
                 title={t("tower")}
                 description={t("towerDesc")}
                 cost={BUILD_COST.tower}
                 onClick={() => onBuild("tower")}
               />
               <CommandButton
-                image="/game-assets/resources/tree2.png"
+                image="./game-assets/resources/tree2.png"
                 title={`${t("autoFarm")} · ${state.autoFarm ? t("on") : t("off")}`}
                 description={t("autoFarmDesc")}
                 onClick={onAutoFarm}
@@ -1032,7 +1032,7 @@ function CommandDeck({
 
   return (
     <div className="empty-command">
-      <img src="/game-assets/ui/cursor.png" alt="" />
+      <img src="./game-assets/ui/cursor.png" alt="" />
       <span>
         <strong>{t("command")}</strong>
         <small>{t("selectPrompt")}</small>
@@ -1636,7 +1636,7 @@ function GameScene({
           <ResourceHud kind="gold" value={hud.resources.gold} label={t("gold")} />
           <ResourceHud kind="meat" value={hud.resources.meat} label={t("meat")} />
           <div className="resource-hud population-hud" data-tip={t("population")}>
-            <SpritePreview src="/game-assets/units/pawn-idle.png" />
+            <SpritePreview src="./game-assets/units/pawn-idle.png" />
             <span>
               <small>{t("population")}</small>
               <strong>
@@ -1756,7 +1756,7 @@ function GameScene({
         </div>
 
         <div className="castle-vitals paper-chip">
-          <img src="/game-assets/buildings/castle.png" alt="" />
+          <img src="./game-assets/buildings/castle.png" alt="" />
           <span>
             <small>Castle</small>
             <i>
@@ -1981,8 +1981,8 @@ function ResultScreen({
           className="result-hero"
           src={
             outcome === "victory"
-              ? "/game-assets/units/warrior-idle.png"
-              : "/game-assets/enemies/minotaur-idle.png"
+              ? "./game-assets/units/warrior-idle.png"
+              : "./game-assets/enemies/minotaur-idle.png"
           }
         />
         <RibbonTitle>

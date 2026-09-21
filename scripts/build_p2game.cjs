@@ -37,15 +37,36 @@ fs.mkdirSync(distStoreDir, { recursive: true });
   }
 });
 
-// 4. Normalize paths in dist/index.html (no root slash, relative ./)
-const indexPath = path.join(DIST_DIR, 'index.html');
-if (fs.existsSync(indexPath)) {
-  let html = fs.readFileSync(indexPath, 'utf8');
-  html = html
-    .replaceAll('"/favicon.png"', '"./favicon.png"')
-    .replace(/\?v=[0-9.]+/g, '');
-  fs.writeFileSync(indexPath, html, 'utf8');
+// 4. Normalize paths across all dist/ files (no root slash, relative ./)
+console.log('4. Normalizing absolute paths to relative ./ for Rule HT-006 compliance...');
+function normalizeDistPaths(dir) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      normalizeDistPaths(p);
+    } else if (/\.(html|js|css)$/.test(entry.name)) {
+      let content = fs.readFileSync(p, 'utf8');
+      let changed = false;
+      if (content.includes('"/favicon.png"')) {
+        content = content.replaceAll('"/favicon.png"', '"./favicon.png"');
+        changed = true;
+      }
+      if (content.includes('/game-assets/')) {
+        const prefix = entry.name.endsWith('.css') ? '../game-assets/' : './game-assets/';
+        content = content
+          .replaceAll('"/game-assets/', '"' + prefix)
+          .replaceAll("'/game-assets/", "'" + prefix)
+          .replaceAll("`/game-assets/", "`" + prefix);
+        changed = true;
+      }
+      if (changed) {
+        fs.writeFileSync(p, content, 'utf8');
+      }
+    }
+  }
 }
+normalizeDistPaths(DIST_DIR);
 
 // 5. Calculate statistics
 function calculateDirStats(dir) {
