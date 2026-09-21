@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "tai-kingdom",
+  "name": "tai'kingdom",
+  "version": "1.0.0",
+  "description": "Web game chiến thuật thời gian thực 2D phong cách pixel medieval. Khai thác gỗ, vàng, xây dựng thành lũy, điều động kỵ binh, cung thủ, tu sĩ và bảo vệ vương quốc trước các đợt tấn công quái vật.",
+  "shortDescription": "Game chiến thuật thời gian thực 2D, xây thành và bảo vệ vương quốc.",
+  "entry": "index.html",
+  "engine": "canvas2d",
+  "orientation": "landscape",
+  "minViewport": {
+    "width": 960,
+    "height": 540
+  },
+  "category": "strategy",
+  "tags": [
+    "strategy",
+    "rts",
+    "pixel-art",
+    "medieval",
+    "2d"
+  ],
+  "ageRating": "E10",
+  "languages": [
+    "vi",
+    "en"
+  ],
+  "controls": {
+    "keyboard": "WASD hoặc mũi tên để lia camera, chuột trái chọn và điều khiển quân, phím 1-4 chọn công trình"
+  },
+  "assets": {
+    "icon": "assets/store/icon-512.png",
+    "cover": "assets/store/cover-1280x720.png",
+    "screenshots": [
+      "assets/store/screenshot-1.png"
+    ]
+  },
+  "permissions": [
+    "fullscreen",
+    "audio"
+  ],
+  "networkAllowlist": [],
+  "sdk": {
+    "version": "1.0",
+    "requiresAuth": false,
+    "cloudSave": false
+  },
+  "attestation": {
+    "ownsRights": true,
+    "noThirdPartyTracking": true,
+    "containsAds": false,
+    "containsIap": false
+  }
+}

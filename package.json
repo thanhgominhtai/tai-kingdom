@@ -10,7 +10,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "assets:store": "powershell -File scripts/generate_store_assets.ps1",
+    "build:p2game": "node scripts/build_p2game.cjs",
+    "validate:p2game": "node scripts/validate_p2game.cjs"
   },
   "dependencies": {
     "react": "19.2.6",
