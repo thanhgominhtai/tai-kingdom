@@ -28,14 +28,13 @@ console.log('3. Ensuring store assets in dist/assets/store/...');
 const distStoreDir = path.join(DIST_DIR, 'assets', 'store');
 const srcStoreDir = path.join(ROOT_DIR, 'public', 'assets', 'store');
 fs.mkdirSync(distStoreDir, { recursive: true });
-['icon-512.png', 'cover-1280x720.png', 'screenshot-1.png'].forEach((file) => {
-  const src = path.join(srcStoreDir, file);
-  if (fs.existsSync(src)) {
-    fs.copyFileSync(src, path.join(distStoreDir, file));
-  } else {
-    console.warn(`WARNING: Store asset missing: ${file}`);
-  }
-});
+if (fs.existsSync(srcStoreDir)) {
+  const storeFiles = fs.readdirSync(srcStoreDir);
+  storeFiles.forEach((file) => {
+    fs.copyFileSync(path.join(srcStoreDir, file), path.join(distStoreDir, file));
+  });
+  console.log(`   Copied ${storeFiles.length} store assets to dist/assets/store/`);
+}
 
 // 4. Normalize paths across all dist/ files (no root slash, relative ./)
 console.log('4. Normalizing absolute paths to relative ./ for Rule HT-006 compliance...');
@@ -102,7 +101,7 @@ console.log(`\n4. Creating upload-ready ZIP archive: dist/${slug}.zip...`);
 try {
   if (fs.existsSync(zipOutPath)) fs.unlinkSync(zipOutPath);
   try {
-    execSync(`tar -a -c -f "${slug}.zip" *`, { cwd: DIST_DIR, stdio: 'inherit' });
+    execSync(`tar --exclude="${slug}.zip" -a -c -f "${slug}.zip" *`, { cwd: DIST_DIR, stdio: 'inherit' });
   } catch (_) {
     const psZipCmd = `powershell -Command "Get-ChildItem -Path '${DIST_DIR}' -Exclude '*.zip' | Compress-Archive -DestinationPath '${zipOutPath}' -Force"`;
     execSync(psZipCmd, { stdio: 'inherit' });
