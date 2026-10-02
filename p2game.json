@@ -26,7 +26,7 @@
     "en"
   ],
   "controls": {
-    "keyboard": "WASD hoặc phím Mũi tên: Lia camera. Chuột trái: Chọn đơn vị / Kéo chọn quân. Chuột phải: Ra lệnh thông minh (di chuyển, tấn công, khai thác). Phím 1-4: Chọn nhanh công trình. Phím Space: Tạm dừng trận đấu."
+    "keyboard": "WASD/Mũi tên: Lia camera. Chuột trái: Chọn quân. Chuột phải: Ra lệnh di chuyển/tấn công/khai thác. Phím 1-4: Chọn nhanh công trình. Phím Space: Tạm dừng."
   },
   "assets": {
     "icon": "assets/store/icon-512.png",

@@ -61,6 +61,7 @@ if (manifest) {
   check('MF-003', ['E', 'E10', 'T', 'M'].includes(manifest.ageRating), `ageRating không hợp lệ (${manifest.ageRating})`);
   check('MF-003', ['webgl', 'webgpu', 'canvas2d', 'dom'].includes(manifest.engine), `engine không hợp lệ (${manifest.engine})`);
   check('CP-001', manifest.attestation?.ownsRights === true, 'attestation.ownsRights bắt buộc phải là true');
+  check('MF-003', !manifest.controls?.keyboard || manifest.controls.keyboard.length <= 200, `controls.keyboard phải tối đa 200 ký tự (hiện tại: ${manifest.controls?.keyboard?.length})`);
 
   // Kiểm tra entry
   const entryFile = manifest.entry || 'index.html';
