@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "tai-kingdom",
   "name": "tai'kingdom",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "tai'kingdom là tựa game chiến thuật thời gian thực (RTS) 2D phong cách pixel medieval đặc sắc. Người chơi sẽ vào vai một vị lãnh chúa anh minh, xây dựng cơ đồ và bảo vệ vương quốc trước các đợt càn quét khốc liệt của quái vật:\n\n🏰 XÂY DỰNG & MỞ RỘNG CĂN CỨ: Đặt nền móng Lâu đài trung tâm, dựng Doanh trại huấn luyện quân, Tháp canh bắn tên phòng thủ, Trại cung thủ, Tu viện hồi phục và Nhà dân gia tăng giới hạn dân số.\n\n🌾 KHAI THÁC KINH TẾ ĐA DẠNG: Điều động nông dân đốn gỗ trong rừng thông, khai thác mỏ vàng lấp lánh và chăn nuôi bầy cừu để tích trữ nguồn thịt dồi dào nuôi quân đội.\n\n⚔️ QUÂN ĐỘI & CHIẾN THUẬT: Chiêu mộ Kiếm sĩ cận chiến kiên cường, Cung thủ tầm xa chi viện đắc lực và Tu sĩ niệm phép hồi sinh sinh lực cho toàn quân.\n\n👹 4 CHIẾN TRƯỜNG & BOSS HÙNG MẠNH: Trải nghiệm 4 bản đồ chiến dịch đa địa hình (The Verdant Reach, Riverwatch Highlands, Amber Twin Lakes, Storm Coast) và đối đầu với bầy Yêu tinh Goblin, Quỷ khổng lồ Troll cùng Trùm quái nhân Minotaur hung hãn.\n\n🎮 2 CHẾ ĐỘ CHƠI: Chinh phục Chế độ Chiến dịch theo màn (Stage Campaign) hoặc thử thách giới hạn sống còn với Chế độ Sinh tồn vô tận (Endless Frontier).",
   "shortDescription": "Game chiến thuật thời gian thực 2D: Xây thành lũy, phát triển kinh tế và phòng thủ vương quốc trước quái vật.",
   "entry": "index.html",
